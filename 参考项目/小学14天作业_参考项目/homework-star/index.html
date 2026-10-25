@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>星星捕手</title>
+<style>
+  /* ===== 页面外观：全部用 CSS 画，不加载任何外部图片或字体 ===== */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background:
+      radial-gradient(circle at 18% 8%, #333a86 0%, rgba(51,58,134,0) 55%),
+      radial-gradient(circle at 85% 90%, #5c2f7a 0%, rgba(92,47,122,0) 50%),
+      linear-gradient(160deg, #171a44 0%, #0c0e28 100%);
+    color: #fff;
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Heiti SC", sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; min-height: 100dvh;
+    padding: 10px; gap: 8px;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 舞台：用 aspect-ratio 保持 480:640 的比例，窗口再大再小都不会变形 */
+  .stage {
+    position: relative;
+    width: min(480px, 100%, calc((100vh - 74px) * 0.75));
+    width: min(480px, 100%, calc((100dvh - 74px) * 0.75));
+    aspect-ratio: 480 / 640;
+    border-radius: 22px;
+    overflow: hidden;
+    background: #14173c;
+    box-shadow: 0 22px 50px rgba(0, 0, 0, .55), 0 0 0 4px rgba(255, 255, 255, .09);
+    container-type: inline-size;   /* 让下面用 cqw 跟着舞台大小缩放字号 */
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* ===== 开始 / 结束 两个浮层 ===== */
+  .overlay {
+    position: absolute; inset: 0; z-index: 5;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; gap: 2.4cqw;
+    padding: 5cqw 6cqw;
+    background: rgba(9, 12, 36, .84);
+    backdrop-filter: blur(3px);
+  }
+  .overlay.hidden { display: none; }
+
+  .big-title {
+    font-size: 30px; font-size: 8.6cqw;
+    font-weight: 900; letter-spacing: 1px; line-height: 1.15;
+    text-shadow: 0 4px 0 rgba(0,0,0,.35);
+  }
+  .sub-title { font-size: 15px; font-size: 4.4cqw; color: #cfd8ff; font-weight: 700; margin-top: -1cqw; }
+
+  .rules {
+    list-style: none; margin: 1.5cqw 0 0; padding: 2.4cqw 3cqw;
+    background: rgba(255, 255, 255, .08);
+    border: 2px solid rgba(255, 255, 255, .16);
+    border-radius: 18px;
+    text-align: left;
+    font-size: 14px; font-size: 4cqw; line-height: 1.75;
+    color: #eef2ff;
+  }
+  .rules b { color: #ffd75e; }
+  .emo { font-size: 1.25em; }
+
+  .best-line { font-size: 14px; font-size: 4cqw; color: #ffd75e; font-weight: 800; }
+  .tip { font-size: 12px; font-size: 3.3cqw; color: #9aa8d6; }
+
+  .btn {
+    font-family: inherit; font-size: 20px; font-size: 5.6cqw; font-weight: 900;
+    color: #3a2410; background: linear-gradient(180deg, #ffe98a, #ffb43d);
+    border: none; border-radius: 999px; padding: 2.4cqw 7cqw; cursor: pointer;
+    box-shadow: 0 5px 0 #cf8a1c, 0 10px 20px rgba(0, 0, 0, .4);
+    transition: transform .08s ease, box-shadow .08s ease;
+  }
+  .btn:hover { filter: brightness(1.06); }
+  .btn:active { transform: translateY(4px); box-shadow: 0 1px 0 #cf8a1c, 0 5px 12px rgba(0,0,0,.4); }
+
+  /* 成绩小窗口 */
+  .score-big { font-size: 46px; font-size: 13cqw; font-weight: 900; color: #ffd75e; line-height: 1; }
+  .score-big span { color: #fff; }
+  .newbest {
+    font-size: 14px; font-size: 4cqw; font-weight: 900; color: #2a1b00;
+    background: linear-gradient(180deg, #fff0a8, #ffcf3d);
+    padding: .8cqw 3cqw; border-radius: 999px;
+  }
+  .newbest.hidden { display: none; }
+  .stat-grid { display: flex; gap: 2.4cqw; }
+  .stat {
+    min-width: 21cqw; padding: 1.8cqw 1cqw; border-radius: 14px;
+    background: rgba(255, 255, 255, .1); border: 2px solid rgba(255, 255, 255, .14);
+  }
+  .stat span { display: block; font-size: 12px; font-size: 3.2cqw; color: #a9b6e2; }
+  .stat b { display: block; font-size: 20px; font-size: 5.6cqw; color: #fff; margin-top: .4cqw; }
+
+  .footer { font-size: 12px; color: #7d88b8; }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <canvas id="game" width="480" height="640" aria-label="星星捕手游戏画面"></canvas>
+
+  <!-- 开始界面：规则说明 + 开始按钮 -->
+  <div class="overlay" id="startScreen">
+    <div class="big-title">⭐ 星星捕手 ⭐</div>
+    <div class="sub-title">帮小猫接住星星，躲开炸弹！</div>
+    <ul class="rules">
+      <li>按 <b>← →</b> 或 <b>A / D</b> 键让小猫左右跑</li>
+      <li>接到 <span class="emo">⭐</span> 得 <b>1 分</b></li>
+      <li>接到 <span class="emo">💣</span> 扣 <b>1 颗心</b>，还会闪一下无敌</li>
+      <li>连着接到 <b>5 颗星星</b> 就开启「<b>连击 ×2</b>」</li>
+      <li>一共 <b>60 秒</b>，一开始有 <b>3 颗心</b></li>
+    </ul>
+    <div class="best-line">🏆 最高分：<span id="bestStart">0</span> 分</div>
+    <button class="btn" id="startBtn">▶ 开始游戏</button>
+    <div class="tip">小提示：按住方向键，小猫会一直跑哦！</div>
+  </div>
+
+  <!-- 结束界面：成绩小窗口 -->
+  <div class="overlay hidden" id="endScreen">
+    <div class="big-title" id="endTitle">🎉 游戏结束</div>
+    <div class="score-big"><span id="endScore">0</span> 分</div>
+    <div class="newbest hidden" id="newBest">🏆 新纪录！</div>
+    <div class="stat-grid">
+      <div class="stat"><span>最高分</span><b id="endBest">0</b></div>
+      <div class="stat"><span>接到星星</span><b id="endStars">0</b></div>
+      <div class="stat"><span>击毁炸弹</span><b id="endBombs">0</b></div>
+    </div>
+    <button class="btn" id="againBtn">🔄 再来一局</button>
+  </div>
+</div>
+
+<div class="footer">用键盘 ← → 或 A / D 玩 · 全部画面都由代码画出来，没有网络请求</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ==========================================================
+     1. 基本设置
+     逻辑分辨率固定 480x640：不管浏览器窗口多大，游戏里的每个位置
+     都按这个尺寸算，所以每台电脑玩起来手感完全一样。
+     ========================================================== */
+  const W = 480, H = 640;
+  const GAME_TIME = 60;                 // 一局 60 秒（规则 4）
+  const GROUND_H = 46;                  // 地面高度
+  const CAT_W = 46, CAT_H = 44;
+  const CAT_Y = H - GROUND_H - CAT_H;   // 小猫站在地面上
+  const CAT_SPEED = 330;                // 小猫左右跑的速度（像素/秒）
+  const STAR_SIZE = 36, BOMB_SIZE = 32;
+  const STAR_FALL = 155;                // 星星慢慢飘下来
+  const BOMB_FALL = 285;                // 炸弹掉得比星星快（规则 3）
+  const STAR_EVERY = 0.85;              // 多久掉一颗星星
+  const BOMB_EVERY = 1.85;              // 多久掉一颗炸弹（比星星久，所以更少）
+  const COMBO_NEED = 5;                 // 连击 5 颗触发加倍（规则 5）
+  const INVINCIBLE = 1.2;               // 受伤后无敌 1.2 秒（规则 3）
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * DPR;               // 画布按屏幕像素放大，图形不会糊
+  canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  const FONT = '"PingFang SC","Microsoft YaHei","Heiti SC",sans-serif';
+  const EMO = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+
+  /* ==========================================================
+     2. 存最高分
+     有的小浏览器打开本地文件时不让用 localStorage，所以包一层，
+     万一不能用，游戏照常玩，只是关掉网页后记录会丢。
+     ========================================================== */
+  const KEY_BEST = 'homework-star-best';
+  const memory = {};
+  const store = {
+    get: function (key, def) {
+      try {
+        const v = localStorage.getItem(key);
+        if (v !== null) return v;
+      } catch (e) { /* 忽略，用内存里的备份 */ }
+      return memory[key] !== undefined ? memory[key] : def;
+    },
+    set: function (key, val) {
+      memory[key] = val;
+      try { localStorage.setItem(key, val); } catch (e) { /* 忽略 */ }
+    }
+  };
+
+  /* ==========================================================
+     3. 游戏状态（所有会变的东西都放在这里，方便重开一局）
+     ========================================================== */
+  const state = {
+    phase: 'start',        // start 开始 / play 进行中 / over 结束
+    score: 0,              // 分数（规则 2）
+    stars: 0,              // 一共接到多少颗星星
+    bombs: 0,              // 被炸弹击中多少次
+    hearts: 3,             // 3 颗心（规则 4）
+    timeLeft: GAME_TIME,   // 剩余时间（规则 4）
+    streak: 0,             // 连续接到星星的数量（规则 5）
+    combo: false,          // 连击加倍是否开启（规则 5）
+    invincible: 0,         // 受伤后的无敌剩余秒数（规则 3）
+    catX: W / 2,           // 小猫的横坐标
+    falling: [],           // 正在下落的星星和炸弹
+    particles: [],         // 特效小点
+    popups: [],            // 飘起来的 "+1" 之类的小字
+    starTimer: 0,          // 距离下一颗星星还有几秒
+    bombTimer: 0,          // 距离下一颗炸弹还有几秒
+    shake: 0,              // 被炸到时画面抖动的强度
+    time: 0                // 已经过去的时间（用来做动画）
+  };
+
+  /* 背景里一闪一闪的小星星，纯装饰 */
+  const bgStars = [];
+  for (let i = 0; i < 60; i++) {
+    bgStars.push({ x: rand(0, W), y: rand(0, H - GROUND_H), r: rand(0.6, 1.7), p: rand(0, 6.28) });
+  }
+
+  /* ==========================================================
+     4. 键盘输入（规则 1）
+     用 keydown / keyup 记录"按住"状态，松开就停。
+     ========================================================== */
+  const keys = { left: false, right: false };
+  const LEFT_KEYS = ['ArrowLeft', 'KeyA'];
+  const RIGHT_KEYS = ['ArrowRight', 'KeyD'];
+
+  window.addEventListener('keydown', function (e) {
+    if (LEFT_KEYS.indexOf(e.code) >= 0) { keys.left = true; e.preventDefault(); }
+    if (RIGHT_KEYS.indexOf(e.code) >= 0) { keys.right = true; e.preventDefault(); }
+    if (e.code === 'Space' || e.code === 'Enter') {
+      if (state.phase !== 'play') { e.preventDefault(); startGame(); }
+    }
+  });
+  window.addEventListener('keyup', function (e) {
+    if (LEFT_KEYS.indexOf(e.code) >= 0) keys.left = false;
+    if (RIGHT_KEYS.indexOf(e.code) >= 0) keys.right = false;
+  });
+  // 切到别的窗口时松开所有键，回来后小猫才不会一直往一边跑
+  window.addEventListener('blur', function () { keys.left = false; keys.right = false; });
+
+  /* ==========================================================
+     5. 音效：用 Web Audio 直接"画"出声音，不需要任何音频文件
+     ========================================================== */
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) { try { audioCtx = new AC(); } catch (e) { audioCtx = null; } }
+    }
+    if (audioCtx && audioCtx.state === 'suspended' && audioCtx.resume) audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      const t = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(vol || 0.12, t + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(t); osc.stop(t + dur + 0.03);
+    } catch (e) { /* 声音失败不影响游戏 */ }
+  }
+
+  /* ==========================================================
+     6. 星星和炸弹
+     这两个东西其实是"同一种东西"，只是速度和长相不一样，
+     所以只写一个生成函数，改几个数字就变成另一种。（规则 2、3）
+     ========================================================== */
+  function spawnFalling(kind) {
+    const isStar = kind === 'star';
+    const size = isStar ? STAR_SIZE : BOMB_SIZE;
+    state.falling.push({
+      kind: kind,
+      x: rand(26, W - 26),       // 随机出现在画面上方的位置
+      y: -size,                 // 从画面外面进来
+      vy: isStar ? STAR_FALL : BOMB_FALL,
+      size: size,
+      rot: 0,
+      rotSpeed: isStar ? rand(-1, 1) : rand(-3.5, 3.5),
+      dead: false
+    });
+  }
+
+  /* ==========================================================
+     7. 每一帧更新游戏
+     ========================================================== */
+  function update(dt) {
+    if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 2.5);
+    if (state.invincible > 0) state.invincible = Math.max(0, state.invincible - dt);
+
+    updateCat(dt);
+    updateFalling(dt);
+
+    state.timeLeft -= dt;                       // 规则 4：时间倒计时
+    if (state.timeLeft <= 0) {
+      state.timeLeft = 0;
+      endGame('⏰ 时间到啦！');
+    } else if (state.hearts <= 0) {
+      endGame('💔 爱心用完了！');
+    }
+  }
+
+  /* 规则 1：小猫左右移动，不能走出画面 */
+  function updateCat(dt) {
+    let dir = 0;
+    if (keys.left) dir -= 1;
+    if (keys.right) dir += 1;
+    state.catX += dir * CAT_SPEED * dt;
+    const half = CAT_W / 2;
+    if (state.catX < half) state.catX = half;
+    if (state.catX > W - half) state.catX = W - half;
+  }
+
+  /* 下落物：生成、移动、碰到小猫 */
+  function updateFalling(dt) {
+    // 玩得越久，东西掉得越密，但不让它变得没法玩
+    const progress = 1 - state.timeLeft / GAME_TIME;
+    const starEvery = STAR_EVERY * (1 - 0.35 * progress);
+    const bombEvery = BOMB_EVERY * (1 - 0.30 * progress);
+
+    state.starTimer -= dt;
+    if (state.starTimer <= 0) { state.starTimer = starEvery; spawnFalling('star'); }
+    state.bombTimer -= dt;
+    if (state.bombTimer <= 0) { state.bombTimer = bombEvery; spawnFalling('bomb'); }
+
+    // 小猫的"碰撞盒子"比画出来的小一点，孩子才觉得公平
+    const catL = state.catX - CAT_W / 2 + 5;
+    const catR = state.catX + CAT_W / 2 - 5;
+    const catT = CAT_Y + 4;
+    const catB = CAT_Y + CAT_H - 4;
+
+    for (let i = state.falling.length - 1; i >= 0; i--) {
+      const o = state.falling[i];
+      o.y += o.vy * dt;
+      o.rot += o.rotSpeed * dt;
+
+      if (o.y > H + o.size) { state.falling.splice(i, 1); continue; }  // 掉出画面就消失
+
+      const hitL = o.x - o.size / 2 + 6;
+      const hitR = o.x + o.size / 2 - 6;
+      const hitT = o.y - o.size / 2 + 4;
+      const hitB = o.y + o.size / 2 - 4;
+      if (hitR > catL && hitL < catR && hitB > catT && hitT < catB) {
+        state.falling.splice(i, 1);
+        if (o.kind === 'star') catchStar(o); else hitBomb(o);
+      }
+    }
+  }
+
+  /* 规则 2 + 规则 5：接到星星，加分并累计连击 */
+  function catchStar(o) {
+    state.stars += 1;
+    state.streak += 1;
+    if (state.streak >= COMBO_NEED) state.combo = true;   // 连续 5 颗 → 连击加倍
+    const value = state.combo ? 2 : 1;                   // 连击时下一颗算 2 分
+    state.score += value;
+    addPopup(o.x, o.y, '+' + value, state.combo ? '#ffd75e' : '#9dffb8');
+    spawnParticles(o.x, o.y, state.combo ? '#ffd75e' : '#ffe98a');
+    tone(880, 0.12, 'triangle', 0.12, 1320);
+    if (state.combo && state.streak === COMBO_NEED) {
+      addPopup(W / 2, 150, '连击 ×2 开启！', '#ffd75e');
+      tone(1046, 0.2, 'sine', 0.14, 1568);
+    }
+  }
+
+  /* 规则 3：接到炸弹扣 1 颗心，并且闪一下进入无敌 */
+  function hitBomb(o) {
+    if (state.invincible > 0) {
+      // 无敌期间：炸弹不再扣心，只是被弹开
+      addPopup(o.x, o.y, '无敌！', '#7fd8ff');
+      spawnParticles(o.x, o.y, '#ff9c9c');
+      tone(420, 0.08, 'square', 0.07);
+      return;
+    }
+    state.hearts -= 1;
+    state.bombs += 1;
+    state.streak = 0;                 // 失误了，连击重新从头数
+    state.combo = false;
+    state.invincible = INVINCIBLE;    // 1.2 秒无敌：这段时间炸弹不再扣心
+    state.shake = 1;                  // 画面抖一抖，表示被炸到
+    addPopup(o.x, o.y, '-1 ❤', '#ff8b8b');
+    spawnParticles(o.x, o.y, '#ff8b8b');
+    tone(200, 0.3, 'sawtooth', 0.16, 80);
+    if (state.hearts <= 0) endGame('💔 爱心用完了！');
+  }
+
+  /* 特效 */
+  function spawnParticles(x, y, color) {
+    for (let i = 0; i < 10; i++) {
+      const life = rand(0.4, 0.85);
+      state.particles.push({
+        x: x, y: y,
+        vx: rand(-130, 130), vy: rand(-170, -40),
+        life: life, total: life,
+        color: color, r: rand(2, 4.5)
+      });
+    }
+  }
+  function addPopup(x, y, text, color) {
+    state.popups.push({ x: x, y: y, text: text, color: color, life: 0.9 });
+  }
+  function updateParticles(dt) {
+    for (let i = state.particles.length - 1; i >= 0; i--) {
+      const p = state.particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 340 * dt;                 // 特效受重力往下掉
+      p.life -= dt;
+      if (p.life <= 0) state.particles.splice(i, 1);
+    }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const p = state.popups[i];
+      p.y -= 42 * dt;                   // 小字慢慢往上飘
+      p.life -= dt;
+      if (p.life <= 0) state.popups.splice(i, 1);
+    }
+  }
+
+  /* ==========================================================
+     8. 开始 / 结束
+     ========================================================== */
+  function el(id) { return document.getElementById(id); }
+
+  function startGame() {
+    ensureAudio();
+    state.phase = 'play';
+    state.score = 0; state.stars = 0; state.bombs = 0;
+    state.hearts = 3; state.timeLeft = GAME_TIME;
+    state.streak = 0; state.combo = false; state.invincible = 0;
+    state.catX = W / 2;
+    state.falling = []; state.particles = []; state.popups = [];
+    state.starTimer = 0.5; state.bombTimer = 2.2; state.shake = 0;
+    el('startScreen').classList.add('hidden');
+    el('endScreen').classList.add('hidden');
+  }
+
+  /* 规则 4：游戏结束，弹成绩小窗口 */
+  function endGame(reason) {
+    if (state.phase === 'over') return;
+    state.phase = 'over';
+    const oldBest = parseInt(store.get(KEY_BEST, '0'), 10) || 0;
+    const isNew = state.score > oldBest;
+    const best = isNew ? state.score : oldBest;
+    store.set(KEY_BEST, String(best));
+
+    el('endTitle').textContent = reason;
+    el('endScore').textContent = state.score;
+    el('endBest').textContent = best;
+    el('endStars').textContent = state.stars;
+    el('endBombs').textContent = state.bombs;
+    el('newBest').classList[isNew ? 'remove' : 'add']('hidden');
+    el('endScreen').classList.remove('hidden');
+    el('bestStart').textContent = best;
+    tone(440, 0.22, 'sine', 0.12, 200);
+  }
+
+  el('startBtn').addEventListener('click', startGame);
+  el('againBtn').addEventListener('click', startGame);
+  el('bestStart').textContent = store.get(KEY_BEST, '0');
+
+  /* ==========================================================
+     9. 画画
+     ========================================================== */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); return; }
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawBackground() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#1a1f52');
+    g.addColorStop(0.55, '#3b2f77');
+    g.addColorStop(1, '#5b3c7c');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    for (let i = 0; i < bgStars.length; i++) {
+      const s = bgStars[i];
+      ctx.globalAlpha = 0.25 + 0.45 * Math.sin(state.time * 1.6 + s.p);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.font = '38px ' + EMO;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.globalAlpha = 0.92;
+    ctx.fillText('🌙', 426, 104);
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGround() {
+    const gy = H - GROUND_H;
+    ctx.fillStyle = '#2a2350';
+    roundRect(-12, gy, W + 24, GROUND_H + 30, 20);
+    ctx.fill();
+    ctx.fillStyle = '#7a63c9';
+    ctx.fillRect(0, gy, W, 5);
+  }
+
+  function drawFalling() {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let i = 0; i < state.falling.length; i++) {
+      const o = state.falling[i];
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      ctx.rotate(o.rot);
+      ctx.font = (o.size + 6) + 'px ' + EMO;
+      ctx.fillText(o.kind === 'star' ? '⭐' : '💣', 0, 0);
+      ctx.restore();
+    }
+  }
+
+  function drawCat() {
+    const cx = state.catX;
+    const cy = CAT_Y + CAT_H / 2;
+
+    // 影子
+    ctx.fillStyle = 'rgba(0,0,0,.28)';
+    ctx.beginPath();
+    ctx.ellipse(cx, CAT_Y + CAT_H - 2, 22, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    if (state.invincible > 0) {
+      // 受后 1.2 秒：小猫一闪一闪（规则 3）
+      ctx.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(state.invincible * 12));
+      ctx.strokeStyle = 'rgba(150, 220, 255, .85)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.font = (CAT_H + 4) + 'px ' + EMO;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('🐱', cx, cy);
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    for (let i = 0; i < state.particles.length; i++) {
+      const p = state.particles[i];
+      ctx.globalAlpha = Math.max(0, p.life / p.total);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let i = 0; i < state.popups.length; i++) {
+      const p = state.popups[i];
+      ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2));
+      ctx.fillStyle = p.color;
+      ctx.font = 'bold 22px ' + FONT;
+      ctx.fillText(p.text, p.x, p.y);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* 顶部的信息板：分数、爱心、时间、连击（规则 6） */
+  function drawHUD() {
+    ctx.fillStyle = 'rgba(8, 11, 34, .55)';
+    roundRect(10, 8, W - 20, 48, 14);
+    ctx.fill();
+
+    ctx.textBaseline = 'middle';
+    // 分数
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#a8b8e8';
+    ctx.font = '13px ' + FONT;
+    ctx.fillText('分数', 26, 23);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 24px ' + FONT;
+    ctx.fillText(String(state.score), 26, 43);
+
+    // 3 颗爱心（没心的显示成灰色）
+    ctx.textAlign = 'center';
+    ctx.font = '22px ' + EMO;
+    for (let i = 0; i < 3; i++) {
+      ctx.fillText(i < state.hearts ? '❤️' : '🤍', W / 2 - 32 + i * 32, 33);
+    }
+
+    // 剩余时间
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#a8b8e8';
+    ctx.font = '13px ' + FONT;
+    ctx.fillText('时间', W - 26, 23);
+    ctx.fillStyle = state.timeLeft <= 10 ? '#ff9a9a' : '#ffffff';
+    ctx.font = 'bold 24px ' + FONT;
+    ctx.fillText(Math.ceil(state.timeLeft) + '秒', W - 26, 43);
+
+    // 连击进度：5 颗小星星，接到几颗就亮几颗（让孩子看得懂规则 5）
+    ctx.textAlign = 'center';
+    ctx.font = '15px ' + EMO;
+    for (let i = 0; i < COMBO_NEED; i++) {
+      ctx.globalAlpha = i < state.streak ? 1 : 0.28;
+      ctx.fillText('⭐', W / 2 - 52 + i * 26, 78);
+    }
+    ctx.globalAlpha = 1;
+
+    // 连击加倍提示
+    if (state.combo) {
+      const pulse = 1 + Math.sin(state.time * 8) * 0.06;
+      ctx.save();
+      ctx.translate(W / 2, 106);
+      ctx.scale(pulse, pulse);
+      ctx.fillStyle = 'rgba(255, 200, 60, .92)';
+      roundRect(-56, -15, 112, 30, 15);
+      ctx.fill();
+      ctx.fillStyle = '#3a2400';
+      ctx.font = 'bold 19px ' + FONT;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('连击 ×2', 0, 1);
+      ctx.restore();
+    }
+  }
+
+  function draw() {
+    ctx.save();
+    if (state.shake > 0) {
+      const s = state.shake * 6;
+      ctx.translate(rand(-s, s), rand(-s, s));
+    }
+    drawBackground();
+    drawGround();
+    drawFalling();
+    drawCat();
+    drawParticles();
+    drawHUD();
+    ctx.restore();
+  }
+
+  /* ==========================================================
+     10. 主循环：用"距离上一帧过了多少秒"来算，
+     这样不管电脑是 60 帧还是 144 帧，游戏速度都一样。
+     ========================================================== */
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);   // 卡顿时不让东西瞬移
+    last = now;
+    state.time += dt;
+    if (state.phase === 'play') update(dt);
+    updateParticles(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  /* 小工具 */
+  function rand(a, b) { return a + Math.random() * (b - a); }
+})();
+</script>
+</body>
+</html>

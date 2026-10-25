@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>太空采矿记</title>
+<style>
+  /* ===== 页面外观：全部用 CSS 画，不加载任何外部图片或字体 ===== */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background:
+      radial-gradient(circle at 80% 5%, #2a2f78 0%, rgba(42,47,120,0) 55%),
+      radial-gradient(circle at 12% 95%, #123a52 0%, rgba(18,58,82,0) 55%),
+      linear-gradient(170deg, #0d1233 0%, #080b20 100%);
+    color: #fff;
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Heiti SC", sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; min-height: 100dvh;
+    padding: 10px; gap: 8px;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 舞台：固定 480:640 比例，窗口大小不影响玩法 */
+  .stage {
+    position: relative;
+    width: min(480px, 100%, calc((100vh - 74px) * 0.75));
+    width: min(480px, 100%, calc((100dvh - 74px) * 0.75));
+    aspect-ratio: 480 / 640;
+    border-radius: 22px;
+    overflow: hidden;
+    background: #0b0f28;
+    box-shadow: 0 22px 50px rgba(0, 0, 0, .55), 0 0 0 4px rgba(255, 255, 255, .09);
+    container-type: inline-size;   /* 下面的 cqw 让字号跟着舞台缩放 */
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* ===== 开始 / 结束 浮层 ===== */
+  .overlay {
+    position: absolute; inset: 0; z-index: 5;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; gap: 2.2cqw;
+    padding: 5cqw 6cqw;
+    background: rgba(6, 10, 30, .86);
+    backdrop-filter: blur(3px);
+    overflow-y: auto;
+  }
+  .overlay.hidden { display: none; }
+
+  .big-title {
+    font-size: 30px; font-size: 8.4cqw;
+    font-weight: 900; line-height: 1.15;
+    text-shadow: 0 4px 0 rgba(0,0,0,.35);
+  }
+  .sub-title { font-size: 15px; font-size: 4.2cqw; color: #bcd6f0; font-weight: 700; margin-top: -1cqw; }
+
+  .rules {
+    list-style: none; margin: 1.4cqw 0 0; padding: 2.2cqw 3cqw;
+    background: rgba(255, 255, 255, .08);
+    border: 2px solid rgba(255, 255, 255, .16);
+    border-radius: 18px; text-align: left;
+    font-size: 13.5px; font-size: 3.8cqw; line-height: 1.7; color: #eaf4ff;
+  }
+  .rules b { color: #7ef0d0; }
+  .emo { font-size: 1.25em; }
+
+  .name-row { display: flex; align-items: center; gap: 1.6cqw; }
+  .name-row label { font-size: 13px; font-size: 3.6cqw; color: #bcd6f0; font-weight: 700; }
+  .name-row input {
+    font-family: inherit; font-size: 14px; font-size: 3.9cqw; font-weight: 700;
+    color: #06210f; background: #ffffff; border: none; border-radius: 999px;
+    padding: 1cqw 3cqw; width: 26cqw; text-align: center; outline: none;
+  }
+
+  .best-line { font-size: 14px; font-size: 3.9cqw; color: #7ef0d0; font-weight: 800; }
+
+  .btn {
+    font-family: inherit; font-size: 20px; font-size: 5.4cqw; font-weight: 900;
+    color: #06210f; background: linear-gradient(180deg, #a9ffe2, #3fd7ab);
+    border: none; border-radius: 999px; padding: 2.3cqw 7cqw; cursor: pointer;
+    box-shadow: 0 5px 0 #1d9d78, 0 10px 20px rgba(0, 0, 0, .4);
+    transition: transform .08s ease, box-shadow .08s ease;
+  }
+  .btn:hover { filter: brightness(1.06); }
+  .btn:active { transform: translateY(4px); box-shadow: 0 1px 0 #1d9d78, 0 5px 12px rgba(0,0,0,.4); }
+
+  .score-big { font-size: 44px; font-size: 12.5cqw; font-weight: 900; color: #7ef0d0; line-height: 1; }
+  .score-big span { color: #fff; }
+  .stat-grid { display: flex; gap: 2cqw; flex-wrap: wrap; justify-content: center; }
+  .stat {
+    min-width: 20cqw; padding: 1.6cqw 1cqw; border-radius: 14px;
+    background: rgba(255, 255, 255, .1); border: 2px solid rgba(255, 255, 255, .14);
+  }
+  .stat span { display: block; font-size: 11.5px; font-size: 3.1cqw; color: #a9c2e0; }
+  .stat b { display: block; font-size: 19px; font-size: 5.2cqw; color: #fff; margin-top: .4cqw; }
+
+  /* 前 5 名排行榜 */
+  .board {
+    width: 100%; max-width: 74cqw;
+    background: rgba(255, 255, 255, .08); border: 2px solid rgba(255, 255, 255, .16);
+    border-radius: 16px; padding: 1.8cqw 2.4cqw; text-align: left;
+  }
+  .board h3 { margin: 0 0 1cqw; font-size: 13px; font-size: 3.6cqw; color: #ffd75e; font-weight: 900; }
+  .board ol { list-style: none; margin: 0; padding: 0; }
+  .board li {
+    display: flex; align-items: center; gap: 1.6cqw;
+    font-size: 13px; font-size: 3.5cqw; padding: .6cqw 0;
+    border-bottom: 1px dashed rgba(255,255,255,.14); color: #e8f1ff;
+  }
+  .board li:last-child { border-bottom: none; }
+  .board .rk { width: 4cqw; color: #ffd75e; font-weight: 900; }
+  .board .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .board .sc { font-weight: 900; color: #7ef0d0; }
+  .board .me { color: #ffd75e; }
+
+  .footer { font-size: 12px; color: #7d88b8; }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <canvas id="game" width="480" height="640" aria-label="太空采矿记游戏画面"></canvas>
+
+  <!-- 开始界面 -->
+  <div class="overlay" id="startScreen">
+    <div class="big-title">🚀 太空采矿记 🚀</div>
+    <div class="sub-title">飞到基地交货，才能真正拿到分数！</div>
+    <ul class="rules">
+      <li>按 <b>W A S D</b> 或 <b>方向键</b> 让飞船上下左右飞</li>
+      <li><span class="emo">🪨</span> 普通矿石 <b>1 分</b>，<span class="emo">💎</span> 金色矿石 <b>3 分</b></li>
+      <li>货舱最多装 <b>6 块</b>，装满就采不了了</li>
+      <li>矿石要飞回最下面的 <b>基地</b> 才算分</li>
+      <li><span class="emo">☄️</span> 撞到扣 <b>1 条命</b>，燃料用完游戏结束</li>
+      <li>时间越久，陨石越多越快（第 <b>1 关</b>、第 <b>2 关</b>…）</li>
+    </ul>
+    <div class="name-row">
+      <label for="nameInput">你的名字</label>
+      <input id="nameInput" maxlength="6" placeholder="小矿工">
+    </div>
+    <div class="best-line">🏆 最高分：<span id="bestStart">0</span> 分</div>
+    <button class="btn" id="startBtn">▶ 开始游戏</button>
+    <div class="tip" style="font-size:3.2cqw;color:#9aa8d6">提示：燃料会慢慢变少，采到矿石就能补充</div>
+  </div>
+
+  <!-- 结束界面：成绩 + 前 5 名排行榜 -->
+  <div class="overlay hidden" id="endScreen">
+    <div class="big-title" id="endTitle">🎉 游戏结束</div>
+    <div class="score-big"><span id="endScore">0</span> 分</div>
+    <div class="stat-grid">
+      <div class="stat"><span>采到矿石</span><b id="endOres">0</b></div>
+      <div class="stat"><span>最高关卡</span><b id="endLevel">1</b></div>
+      <div class="stat"><span>飞行时间</span><b id="endTime">0秒</b></div>
+    </div>
+    <div class="board">
+      <h3>🏅 前 5 名排行榜</h3>
+      <ol id="top5"><li>还没有成绩，快去挖矿吧！</li></ol>
+    </div>
+    <button class="btn" id="againBtn">🔄 再来一局</button>
+  </div>
+</div>
+
+<div class="footer">用键盘 W A S D 或 方向键玩 · 全部画面都由代码画出来，没有网络请求</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ==========================================================
+     1. 基本设置
+     逻辑分辨率固定 480x640，窗口再大再小玩法也一样。
+     ========================================================== */
+  const W = 480, H = 640;
+  const HUD_H = 96;                // 顶部信息板高度
+  const BASE_H = 58;               // 底部基地高度
+  const BASE_Y = H - BASE_H;       // 基地的上沿
+  const SHIP_SIZE = 38;
+  const SHIP_SPEED = 235;          // 飞船飞行速度（像素/秒）
+  const CARGO_MAX = 6;             // 货舱最多装 6 块（规则 3）
+  const FUEL_MAX = 100;            // 燃料上限
+  const FUEL_DRAIN = 1.55;         // 每秒消耗多少燃料（规则 5）
+  const ORE_EVERY = 1.2;           // 多久出现一块矿石
+  const META_EVERY = 1.7;          // 多久出现一颗陨石
+  const LEVEL_TIME = 15;           // 每 15 秒升 1 关（规则 6）
+  const LIVES = 3;                 // 3 条命（规则 4）
+  const INVINCIBLE = 1.4;          // 被撞到后的无敌时间
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  const FONT = '"PingFang SC","Microsoft YaHei","Heiti SC",sans-serif';
+  const EMO = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+
+  /* ==========================================================
+     2. 存档：最高分 + 前 5 名排行榜
+     ========================================================== */
+  const KEY_TOP5 = 'homework-space-top5';
+  const KEY_NAME = 'homework-space-name';
+  const memory = {};
+  const store = {
+    get: function (key, def) {
+      try { const v = localStorage.getItem(key); if (v !== null) return v; } catch (e) { /* 用内存备份 */ }
+      return memory[key] !== undefined ? memory[key] : def;
+    },
+    set: function (key, val) {
+      memory[key] = val;
+      try { localStorage.setItem(key, val); } catch (e) { /* 忽略 */ }
+    }
+  };
+  /* 排行榜数据格式：[{name:'小矿工', score:120}, ...] */
+  function loadTop5() {
+    let raw = null;
+    try { raw = localStorage.getItem(KEY_TOP5); } catch (e) { raw = null; }
+    if (!raw) raw = memory[KEY_TOP5];
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function saveTop5(list) {
+    store.set(KEY_TOP5, JSON.stringify(list));
+  }
+  function top5Score() {
+    const list = loadTop5();
+    return list.length ? Math.max.apply(null, list.map(function (i) { return i.score; })) : 0;
+  }
+
+  /* ==========================================================
+     3. 游戏状态
+     ========================================================== */
+  const state = {
+    phase: 'start',        // start / play / over
+    score: 0,              // 真正交付出去的分数（规则 2、3）
+    cargo: [],             // 货舱里的矿石（规则 3）
+    lives: LIVES,          // 生命（规则 4）
+    fuel: FUEL_MAX,        // 燃料（规则 5）
+    level: 1,              // 难度关卡（规则 6）
+    time: 0,               // 已经飞了多久
+    shipX: W / 2,
+    shipY: H / 2,
+    shipTilt: 0,
+    invincible: 0,         // 无敌剩余时间（规则 4）
+    ores: [],              // 画面上的矿石
+    meteors: [],           // 画面上的陨石
+    particles: [],
+    popups: [],
+    hint: '',              // 中间的提示文字
+    hintLife: 0,
+    oreTimer: 0,
+    meteorTimer: 0,
+    shake: 0,              // 被撞到时画面抖动的强度
+    fuelWarned: false,     // 燃料快用完时只提醒一次
+    totalOres: 0           // 一共采到过多少块矿石
+  };
+
+  /* 背景星星，纯装饰 */
+  const bgStars = [];
+  for (let i = 0; i < 70; i++) {
+    bgStars.push({ x: rand(0, W), y: rand(0, H), r: rand(0.5, 1.6), p: rand(0, 6.28) });
+  }
+
+  /* ==========================================================
+     4. 键盘输入（规则 1）：WASD 和方向键都能飞
+     ========================================================== */
+  const keys = { up: false, down: false, left: false, right: false };
+  const MAP = {
+    ArrowUp: 'up', KeyW: 'up',
+    ArrowDown: 'down', KeyS: 'down',
+    ArrowLeft: 'left', KeyA: 'left',
+    ArrowRight: 'right', KeyD: 'right'
+  };
+  window.addEventListener('keydown', function (e) {
+    const k = MAP[e.code];
+    if (k) { keys[k] = true; e.preventDefault(); }
+    if ((e.code === 'Space' || e.code === 'Enter') && state.phase !== 'play') {
+      e.preventDefault(); startGame();
+    }
+  });
+  window.addEventListener('keyup', function (e) {
+    const k = MAP[e.code];
+    if (k) { keys[k] = false; e.preventDefault(); }
+  });
+  window.addEventListener('blur', function () {
+    keys.up = keys.down = keys.left = keys.right = false;
+  });
+
+  /* ==========================================================
+     5. 音效
+     ========================================================== */
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) { try { audioCtx = new AC(); } catch (e) { audioCtx = null; } }
+    }
+    if (audioCtx && audioCtx.state === 'suspended' && audioCtx.resume) audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      const t = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(vol || 0.12, t + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(t); osc.stop(t + dur + 0.03);
+    } catch (e) { /* 声音失败不影响游戏 */ }
+  }
+
+  /* ==========================================================
+     6. 生成东西
+     矿石和陨石用的是同一套"往下掉"的写法，只是参数不同。
+     ========================================================== */
+  function spawnOre() {
+    // 金色矿石比普通矿石少（规则 2）
+    const gold = Math.random() < 0.22;
+    state.ores.push({
+      gold: gold,
+      value: gold ? 3 : 1,          // 金色 3 分，普通 1 分
+      fuel: gold ? 18 : 13,        // 采到能补多少燃料（规则 5）
+      baseX: rand(28, W - 28),
+      x: 0, y: rand(HUD_H + 10, BASE_Y - 40),
+      vy: gold ? 26 : 36,           // 慢慢往下飘
+      phase: rand(0, 6.28),
+      size: gold ? 34 : 30,
+      rot: 0,
+      cool: 0              // 被弹开后短暂不检测碰撞
+    });
+  }
+
+  function spawnMeteor() {
+    // 越到后面的关卡，陨石越多、越快（规则 6）
+    const lv = state.level - 1;
+    const count = Math.min(3, 1 + Math.floor(lv / 2));
+    for (let i = 0; i < count; i++) {
+      state.meteors.push({
+        x: rand(24, W - 24),
+        y: -40 - i * 30,
+        vy: 90 + lv * 22,            // 刚出来时的速度
+        accel: 210 + lv * 32,        // 越掉越快（"加速落下"）
+        maxVy: 430,
+        rot: 0,
+        rotSpeed: rand(-2.4, 2.4),
+        vx: rand(-30, 30),
+        size: 34
+      });
+    }
+  }
+
+  /* ==========================================================
+     7. 更新
+     ========================================================== */
+  function update(dt) {
+    state.time += dt;
+    if (state.invincible > 0) state.invincible = Math.max(0, state.invincible - dt);
+    if (state.hintLife > 0) state.hintLife = Math.max(0, state.hintLife - dt);
+    if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 2.5);
+
+    // 难度升级：每 LEVEL_TIME 秒升一关（规则 6）
+    const newLevel = 1 + Math.floor(state.time / LEVEL_TIME);
+    if (newLevel !== state.level) {
+      state.level = newLevel;
+      showHint('⚡ 难度升级：第 ' + state.level + ' 关！', 1.6);
+      tone(660, 0.25, 'square', 0.09, 990);
+    }
+
+    updateShip(dt);
+    updateFuel(dt);
+    updateOres(dt);
+    updateMeteors(dt);
+
+    if (state.lives <= 0) { endGame('💥 飞船被撞坏了！'); return; }
+    if (state.fuel <= 0) { state.fuel = 0; endGame('⛽ 燃料用完了！'); }
+  }
+
+  /* 规则 1：飞船上下左右移动，不能飞出画面，也不能掉到基地下面 */
+  function updateShip(dt) {
+    let dx = 0, dy = 0;
+    if (keys.left) dx -= 1;
+    if (keys.right) dx += 1;
+    if (keys.up) dy -= 1;
+    if (keys.down) dy += 1;
+
+    // 斜着飞的时候不要比直着快，不然很难控制
+    if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
+
+    state.shipX += dx * SHIP_SPEED * dt;
+    state.shipY += dy * SHIP_SPEED * dt;
+
+    const half = SHIP_SIZE / 2;
+    state.shipX = Math.max(half, Math.min(W - half, state.shipX));
+    state.shipY = Math.max(HUD_H + half, Math.min(BASE_Y - half, state.shipY));
+
+    // 侧着飞的时候机身稍微倾斜，看起来更自然
+    const wantTilt = dx * 0.16;
+    state.shipTilt += (wantTilt - state.shipTilt) * Math.min(1, dt * 10);
+
+    // 飞到基地就交货（规则 3）
+    if (state.shipY + half >= BASE_Y - 2) deliverCargo();
+  }
+
+  /* 规则 5：燃料慢慢减少 */
+  function updateFuel(dt) {
+    state.fuel -= (FUEL_DRAIN + (state.level - 1) * 0.1) * dt;
+    if (state.fuel < 25 && state.fuel > 0 && !state.fuelWarned) {
+      state.fuelWarned = true;
+      showHint('⚠️ 燃料快没了，快去采矿石！', 2.2);
+      tone(300, 0.2, 'square', 0.09, 200);
+    }
+    if (state.fuel <= 0) { state.fuel = 0; endGame('⛽ 燃料用完了！'); }
+  }
+
+  /* 规则 2：矿石出现、漂移、被飞船收进货舱 */
+  function updateOres(dt) {
+    state.oreTimer -= dt;
+    if (state.oreTimer <= 0) {
+      state.oreTimer = Math.max(0.7, ORE_EVERY - (state.level - 1) * 0.05);
+      if (state.ores.length < 8) spawnOre();
+    }
+
+    const sx = state.shipX, sy = state.shipY;
+    for (let i = state.ores.length - 1; i >= 0; i--) {
+      const o = state.ores[i];
+      if (o.cool > 0) o.cool -= dt;      // 刚被弹开的矿石先不检测碰撞
+      o.y += o.vy * dt;
+      o.x = o.baseX + Math.sin(state.time * 1.3 + o.phase) * 16;   // 左右轻轻晃
+      o.rot = Math.sin(state.time * 1.7 + o.phase) * 0.25;
+      if (o.y > BASE_Y + 30) { state.ores.splice(i, 1); continue; }
+
+      const hit = o.cool <= 0 &&
+                  Math.abs(o.x - sx) < SHIP_SIZE / 2 + o.size / 2 - 6 &&
+                  Math.abs(o.y - sy) < SHIP_SIZE / 2 + o.size / 2 - 6;
+      if (hit) {
+        if (state.cargo.length >= CARGO_MAX) {
+          // 货舱满了，矿石只能先放着（规则 3）
+          o.vy = -50; o.baseX = o.x; o.y = sy - 26;   // 弹开一点
+          o.cool = 0.8;                                // 免得一直重复提示
+          showHint('📦 货舱满了，回基地交付吧', 2.4);
+          tone(240, 0.12, 'square', 0.08);
+        } else {
+          state.ores.splice(i, 1);
+          collectOre(o);
+        }
+      }
+    }
+  }
+
+  /* 收到矿石：进舱、补燃料（但分数还没到手） */
+  function collectOre(o) {
+    state.cargo.push(o);
+    state.totalOres += 1;
+    state.fuel = Math.min(FUEL_MAX, state.fuel + o.fuel);
+    spawnParticles(o.x, o.y, o.gold ? '#ffd75e' : '#9ad0ff');
+    addPopup(o.x, o.y - 18, (o.gold ? '💎' : '🪨') + ' +' + o.value + '分', o.gold ? '#ffd75e' : '#9ad0ff');
+    tone(o.gold ? 1046 : 700, 0.14, 'triangle', 0.11, o.gold ? 1568 : 980);
+    if (state.cargo.length >= CARGO_MAX) {
+      showHint('📦 货舱满了，回基地交付吧', 2.6);
+    }
+  }
+
+  /* 规则 3：飞回基地，把货舱里的矿石换成真正的分数 */
+  function deliverCargo() {
+    if (!state.cargo.length) return;
+    let sum = 0;
+    for (let i = 0; i < state.cargo.length; i++) sum += state.cargo[i].value;
+    state.cargo = [];
+    state.score += sum;                 // 交货了才真正算分
+    state.fuel = Math.min(FUEL_MAX, state.fuel + 6);   // 交货还有一点奖励燃料
+    addPopup(W / 2, BASE_Y - 34, '交付 +' + sum + ' 分！', '#7ef0d0');
+    for (let i = 0; i < 14; i++) {
+      spawnParticles(W / 2 + rand(-60, 60), BASE_Y - 6, '#7ef0d0');
+    }
+    tone(523, 0.12, 'sine', 0.11);
+    setTimeout(function () { tone(784, 0.18, 'sine', 0.11); }, 90);
+  }
+
+  /* 规则 4：陨石加速落下，撞到扣 1 条命并闪一下 */
+  function updateMeteors(dt) {
+    state.meteorTimer -= dt;
+    if (state.meteorTimer <= 0) {
+      const lv = state.level - 1;
+      state.meteorTimer = Math.max(0.45, META_EVERY - lv * 0.15);
+      spawnMeteor();
+    }
+
+    const sx = state.shipX, sy = state.shipY;
+    for (let i = state.meteors.length - 1; i >= 0; i--) {
+      const m = state.meteors[i];
+      m.vy = Math.min(m.maxVy, m.vy + m.accel * dt);   // 越掉越快
+      m.y += m.vy * dt;
+      m.x += m.vx * dt;
+      m.rot += m.rotSpeed * dt;
+      if (m.x < 12 || m.x > W - 12) { m.vx = -m.vx; m.x = Math.max(12, Math.min(W - 12, m.x)); }
+
+      if (m.y > BASE_Y + 20) {          // 砸到基地上，消失
+        state.meteors.splice(i, 1);
+        spawnParticles(m.x, BASE_Y, '#ff9c6b');
+        continue;
+      }
+
+      const hit = Math.abs(m.x - sx) < SHIP_SIZE / 2 + m.size / 2 - 8 &&
+                  Math.abs(m.y - sy) < SHIP_SIZE / 2 + m.size / 2 - 8;
+      if (hit) {
+        state.meteors.splice(i, 1);
+        hitShip(m);
+      }
+    }
+  }
+
+  function hitShip(m) {
+    if (state.invincible > 0) return;        // 无敌中不再扣命
+    state.lives -= 1;
+    state.invincible = INVINCIBLE;            // 闪一下，1.4 秒无敌
+    state.shake = 1;
+    spawnParticles(m.x, m.y, '#ff8b8b');
+    addPopup(state.shipX, state.shipY - 26, '-1 ❤', '#ff8b8b');
+    tone(180, 0.32, 'sawtooth', 0.16, 70);
+    if (state.lives <= 0) endGame('💥 飞船被撞坏了！');
+  }
+
+  /* 特效 */
+  function spawnParticles(x, y, color) {
+    for (let i = 0; i < 10; i++) {
+      const life = rand(0.4, 0.85);
+      state.particles.push({
+        x: x, y: y, vx: rand(-130, 130), vy: rand(-170, -40),
+        life: life, total: life, color: color, r: rand(2, 4.5)
+      });
+    }
+  }
+  function addPopup(x, y, text, color) {
+    state.popups.push({ x: x, y: y, text: text, color: color, life: 1.0 });
+  }
+  function showHint(text, sec) {
+    state.hint = text; state.hintLife = sec || 2;
+  }
+  function updateParticles(dt) {
+    for (let i = state.particles.length - 1; i >= 0; i--) {
+      const p = state.particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 340 * dt;
+      p.life -= dt;
+      if (p.life <= 0) state.particles.splice(i, 1);
+    }
+    for (let i = state.popups.length - 1; i >= 0; i--) {
+      const p = state.popups[i];
+      p.y -= 42 * dt;
+      p.life -= dt;
+      if (p.life <= 0) state.popups.splice(i, 1);
+    }
+  }
+
+  /* ==========================================================
+     8. 开始 / 结束 + 排行榜
+     ========================================================== */
+  function el(id) { return document.getElementById(id); }
+
+  function startGame() {
+    ensureAudio();
+    state.phase = 'play';
+    state.score = 0;
+    state.cargo = [];
+    state.lives = LIVES;
+    state.fuel = FUEL_MAX;
+    state.level = 1;
+    state.time = 0;
+    state.shipX = W / 2; state.shipY = H / 2; state.shipTilt = 0;
+    state.invincible = 0;
+    state.ores = []; state.meteors = []; state.particles = []; state.popups = [];
+    state.oreTimer = 0.4; state.meteorTimer = 1.6;
+    state.fuelWarned = false;
+    state.delivered = 0; state.totalOres = 0;
+    state.hint = ''; state.hintLife = 0;
+    el('startScreen').classList.add('hidden');
+    el('endScreen').classList.add('hidden');
+    showHint('🚀 出发！去把矿石运回基地', 1.8);
+  }
+
+  function endGame(reason) {
+    if (state.phase === 'over') return;
+    state.phase = 'over';
+    const playerName = (el('nameInput').value || '小矿工').slice(0, 6);
+    store.set(KEY_NAME, playerName);
+
+    // 把这次的分数放进前 5 名（规则 7）
+    const list = loadTop5();
+    list.push({ name: playerName, score: state.score });
+    list.sort(function (a, b) { return b.score - a.score; });
+    const top5 = list.slice(0, 5);
+    saveTop5(top5);
+
+    el('endTitle').textContent = reason;
+    el('endScore').textContent = state.score;
+    el('endOres').textContent = state.totalOres;
+    el('endLevel').textContent = '第' + state.level + '关';
+    el('endTime').textContent = Math.floor(state.time) + '秒';
+    renderTop5(top5, playerName, state.score);
+    el('endScreen').classList.remove('hidden');
+    el('bestStart').textContent = top5Score();
+    tone(420, 0.24, 'sine', 0.12, 180);
+  }
+
+  /* 把排行榜画成网页文字，方便孩子看 */
+  function renderTop5(list, myName, myScore) {
+    const box = el('top5');
+    box.innerHTML = '';
+    if (!list.length) {
+      const li = document.createElement('li');
+      li.textContent = '还没有成绩，快去挖矿吧！';
+      box.appendChild(li);
+      return;
+    }
+    const medal = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i];
+      const li = document.createElement('li');
+      const rk = document.createElement('span'); rk.className = 'rk';
+      rk.textContent = medal[i] || (i + 1);
+      const nm = document.createElement('span'); nm.className = 'nm';
+      nm.textContent = it.name + (it.name === myName && it.score === myScore ? '（我）' : '');
+      const sc = document.createElement('span'); sc.className = 'sc';
+      sc.textContent = it.score + ' 分';
+      li.appendChild(rk); li.appendChild(nm); li.appendChild(sc);
+      box.appendChild(li);
+    }
+  }
+
+  el('startBtn').addEventListener('click', startGame);
+  el('againBtn').addEventListener('click', startGame);
+  el('nameInput').value = store.get(KEY_NAME, '小矿工');
+  el('bestStart').textContent = top5Score();
+
+  /* ==========================================================
+     9. 画画
+     ========================================================== */
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); return; }
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawBackground() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0e1338');
+    g.addColorStop(0.6, '#141a45');
+    g.addColorStop(1, '#0a1b33');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    for (let i = 0; i < bgStars.length; i++) {
+      const s = bgStars[i];
+      ctx.globalAlpha = 0.2 + 0.4 * Math.sin(state.time * 1.4 + s.p);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 远处的星球，纯装饰
+    ctx.font = '44px ' + EMO;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.globalAlpha = 0.85;
+    ctx.fillText('🪐', 66, 150);
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBase() {
+    // 基地（规则 1：屏幕最下面是基地）
+    ctx.fillStyle = '#1b2647';
+    ctx.fillRect(0, BASE_Y, W, BASE_H);
+    ctx.fillStyle = '#5fe3c4';
+    ctx.fillRect(0, BASE_Y, W, 4);
+
+    // 停机坪
+    ctx.fillStyle = '#27395f';
+    roundRect(W / 2 - 78, BASE_Y + 4, 156, 14, 7);
+    ctx.fill();
+
+    // 一闪一闪的小灯
+    for (let i = 0; i < 6; i++) {
+      const on = (Math.floor(state.time * 3) + i) % 2 === 0;
+      ctx.fillStyle = on ? '#ffd75e' : '#3a4c72';
+      ctx.beginPath();
+      ctx.arc(22 + i * ((W - 44) / 5), BASE_Y + 26, 3.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#cfe6ff';
+    ctx.font = 'bold 16px ' + FONT;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('基地 🏠', W / 2, BASE_Y + 44);
+
+    // 货舱里有货时，提示可以交货了
+    if (state.cargo.length && state.phase === 'play') {
+      const blink = 0.55 + 0.45 * Math.sin(state.time * 6);
+      ctx.globalAlpha = blink;
+      ctx.fillStyle = '#7ef0d0';
+      ctx.font = 'bold 15px ' + FONT;
+      ctx.fillText('▼ 交付 ' + cargoValue() + ' 分', W / 2, BASE_Y - 16);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function cargoValue() {
+    let sum = 0;
+    for (let i = 0; i < state.cargo.length; i++) sum += state.cargo[i].value;
+    return sum;
+  }
+
+  function drawOres() {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let i = 0; i < state.ores.length; i++) {
+      const o = state.ores[i];
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      ctx.rotate(o.rot);
+      ctx.font = o.size + 'px ' + EMO;
+      ctx.fillText(o.gold ? '💎' : '🪨', 0, 0);
+      ctx.restore();
+    }
+  }
+
+  function drawMeteors() {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let i = 0; i < state.meteors.length; i++) {
+      const m = state.meteors[i];
+      // 陨石后面拖一条小尾巴，看起来有速度
+      ctx.strokeStyle = 'rgba(255,150,90,.55)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(m.x, m.y - 10);
+      ctx.lineTo(m.x - m.vx * 0.06, m.y - 10 - m.vy * 0.10);
+      ctx.stroke();
+      ctx.save();
+      ctx.translate(m.x, m.y);
+      ctx.rotate(m.rot);
+      ctx.font = m.size + 'px ' + EMO;
+      ctx.fillText('☄️', 0, 0);
+      ctx.restore();
+    }
+  }
+
+  function drawShip() {
+    const sx = state.shipX, sy = state.shipY;
+    ctx.save();
+    if (state.invincible > 0) {
+      // 被撞到后闪一下（规则 4）
+      ctx.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(state.invincible * 12));
+    }
+    // 引擎的小火苗
+    const flame = 8 + Math.sin(state.time * 24) * 3;
+    ctx.fillStyle = '#ffb347';
+    ctx.beginPath();
+    ctx.moveTo(sx - 6, sy + 14);
+    ctx.lineTo(sx + 6, sy + 14);
+    ctx.lineTo(sx, sy + 20 + flame);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.translate(sx, sy);
+    ctx.rotate(state.shipTilt);
+    ctx.font = SHIP_SIZE + 'px ' + EMO;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('🚀', 0, 0);
+    ctx.restore();
+
+    if (state.invincible > 0) {
+      ctx.strokeStyle = 'rgba(120, 210, 255, .8)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 26, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  function drawParticles() {
+    for (let i = 0; i < state.particles.length; i++) {
+      const p = state.particles[i];
+      ctx.globalAlpha = Math.max(0, p.life / p.total);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let i = 0; i < state.popups.length; i++) {
+      const p = state.popups[i];
+      ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2));
+      ctx.fillStyle = p.color;
+      ctx.font = 'bold 20px ' + FONT;
+      ctx.fillText(p.text, p.x, p.y);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* 顶部信息板：分数、货舱、生命、难度、燃料条（规则 7） */
+  function drawHUD() {
+    ctx.fillStyle = 'rgba(6, 10, 30, .62)';
+    roundRect(8, 6, W - 16, 44, 12);
+    ctx.fill();
+    roundRect(8, 54, W - 16, 36, 12);
+    ctx.fill();
+
+    ctx.textBaseline = 'middle';
+    // 分数
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#9db4dd';
+    ctx.font = '12px ' + FONT;
+    ctx.fillText('分数', 26, 18);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 23px ' + FONT;
+    ctx.fillText(String(state.score), 26, 37);
+
+    // 生命
+    ctx.textAlign = 'center';
+    ctx.font = '21px ' + EMO;
+    for (let i = 0; i < LIVES; i++) {
+      ctx.fillText(i < state.lives ? '❤️' : '🤍', W / 2 - 32 + i * 32, 29);
+    }
+
+    // 难度关卡
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#9db4dd';
+    ctx.font = '12px ' + FONT;
+    ctx.fillText('难度', W - 26, 18);
+    ctx.fillStyle = '#ffd75e';
+    ctx.font = 'bold 20px ' + FONT;
+    ctx.fillText('第' + state.level + '关', W - 26, 37);
+
+    // 货舱
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#9db4dd';
+    ctx.font = '12px ' + FONT;
+    ctx.fillText('货舱 ' + state.cargo.length + '/' + CARGO_MAX, 26, 63);
+    for (let i = 0; i < CARGO_MAX; i++) {
+      const filled = i < state.cargo.length;
+      const item = filled ? state.cargo[i] : null;
+      const x = 100 + i * 19, y = 72;
+      ctx.fillStyle = filled ? (item.gold ? '#ffd75e' : '#9ad0ff') : 'rgba(255,255,255,.12)';
+      roundRect(x, y - 7, 15, 14, 4);
+      ctx.fill();
+    }
+
+    // 燃料条
+    const barX = 214, barY = 68, barW = W - 26 - barX, barH = 12;
+    ctx.fillStyle = '#9db4dd';
+    ctx.font = '12px ' + FONT;
+    ctx.fillText('燃料', barX, 62);
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.ceil(state.fuel) + '%', W - 26, 62);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(255,255,255,.14)';
+    roundRect(barX, barY, barW, barH, 6);
+    ctx.fill();
+    const ratio = Math.max(0, Math.min(1, state.fuel / FUEL_MAX));
+    if (ratio > 0) {
+      ctx.fillStyle = ratio > 0.45 ? '#5fe3c4' : (ratio > 0.2 ? '#ffd75e' : '#ff7b7b');
+      roundRect(barX, barY, Math.max(6, barW * ratio), barH, 6);
+      ctx.fill();
+    }
+  }
+
+  function drawHint() {
+    if (state.hintLife <= 0) return;
+    ctx.globalAlpha = Math.min(1, state.hintLife);
+    ctx.fillStyle = 'rgba(6, 10, 30, .8)';
+    roundRect(W / 2 - 120, HUD_H + 12, 240, 32, 16);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 16px ' + FONT;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(state.hint, W / 2, HUD_H + 29);
+    ctx.globalAlpha = 1;
+  }
+
+  function draw() {
+    ctx.save();
+    if (state.shake > 0) {
+      const s = state.shake * 6;
+      ctx.translate(rand(-s, s), rand(-s, s));
+    }
+    drawBackground();
+    drawBase();
+    drawOres();
+    drawMeteors();
+    drawShip();
+    drawParticles();
+    drawHUD();
+    drawHint();
+    ctx.restore();
+  }
+
+  /* ==========================================================
+     10. 主循环：用"过了多少秒"算速度，跟刷新率无关
+     ========================================================== */
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (state.phase === 'play') update(dt);
+    updateParticles(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  /* 小工具 */
+  function rand(a, b) { return a + Math.random() * (b - a); }
+})();
+</script>
+</body>
+</html>

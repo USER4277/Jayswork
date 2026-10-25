@@ -1,0 +1,15 @@
+{
+  "name": "caochangxun-education",
+  "private": true,
+  "version": "1.0.0",
+  "description": "曹昌洵专属教育系统 —— 作业 + 互动教学",
+  "type": "module",
+  "scripts": {
+    "postinstall": "npm --prefix server install && npm --prefix web install",
+    "content": "python3 开发/content/build_content.py && python3 开发/content/build_graph.py",
+    "dev": "node 开发/dev.mjs",
+    "build": "npm --prefix web run build",
+    "start": "npm --prefix server start",
+    "typecheck": "npm --prefix web exec tsc -- --noEmit"
+  }
+}

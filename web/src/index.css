@@ -1,0 +1,109 @@
+@import 'tailwindcss';
+
+/*
+ * 设计基调：清爽、留白足、圆角大、点击区域大。
+ * 颜色按科目区分，孩子一眼能认出今天做哪一科。
+ */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
+
+  --color-math: oklch(0.58 0.16 258);
+  --color-math-soft: oklch(0.96 0.03 258);
+  --color-chinese: oklch(0.58 0.17 12);
+  --color-chinese-soft: oklch(0.96 0.035 12);
+  --color-english: oklch(0.68 0.15 75);
+  --color-english-soft: oklch(0.97 0.045 85);
+  --color-coding: oklch(0.6 0.13 165);
+  --color-coding-soft: oklch(0.96 0.035 165);
+
+  --color-ink: oklch(0.28 0.02 260);
+  --color-ink-soft: oklch(0.52 0.02 260);
+  --color-paper: oklch(0.985 0.004 260);
+  --color-line: oklch(0.92 0.008 260);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+/* 输入框：给小学生用，字大一点、点得准 */
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.field {
+  width: 100%;
+  border: 2px solid var(--color-line);
+  border-radius: 0.75rem;
+  background: white;
+  padding: 0.625rem 0.875rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field:focus {
+  border-color: oklch(0.62 0.13 258);
+  box-shadow: 0 0 0 4px oklch(0.62 0.13 258 / 0.12);
+}
+
+.field::placeholder {
+  color: oklch(0.7 0.01 260);
+}
+
+/* 卡片 */
+.card {
+  background: white;
+  border: 1px solid var(--color-line);
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px oklch(0.3 0.02 260 / 0.04);
+}
+
+/* 滚动条低调一点 */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: oklch(0.88 0.01 260);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* 朗读按钮的呼吸提示 */
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.62 0.16 258 / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 12px oklch(0.62 0.16 258 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 oklch(0.62 0.16 258 / 0);
+  }
+}
+.speaking {
+  animation: pulse-ring 1.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speaking {
+    animation: none;
+  }
+}

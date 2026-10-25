@@ -1,0 +1,45 @@
+{
+  "source": "/Users/zhoufuyechu/Documents/教育/cn-math-taxonomy",
+  "subjects": {
+    "math": {
+      "prefix": "cnm_p",
+      "topics": 242,
+      "dependencies": 366,
+      "questions": 968,
+      "grades": {
+        "1": 38,
+        "2": 31,
+        "3": 39,
+        "4": 42,
+        "5": 49,
+        "6": 43
+      }
+    },
+    "english": {
+      "prefix": "cne_p",
+      "topics": 208,
+      "dependencies": 254,
+      "questions": 832,
+      "grades": {
+        "3": 71,
+        "4": 42,
+        "5": 54,
+        "6": 41
+      }
+    },
+    "chinese": {
+      "prefix": "cnc_p",
+      "topics": 381,
+      "dependencies": 512,
+      "questions": 1524,
+      "grades": {
+        "1": 79,
+        "2": 78,
+        "3": 82,
+        "4": 62,
+        "5": 40,
+        "6": 40
+      }
+    }
+  }
+}
