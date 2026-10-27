@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { onSpeakingChange, speak, stopSpeaking, speechSupported } from '../lib/speech'
+import { onSpeakingChange, speak, stopSpeaking, speechSupported, speakingText } from '../lib/speech'
 import { cn } from '../lib/format'
+import { Square, Volume2 } from 'lucide-react'
 
 interface Props {
   text: string
@@ -24,7 +25,7 @@ export default function SpeechButton({
   const [active, setActive] = useState(false)
   const supported = speechSupported()
 
-  useEffect(() => onSpeakingChange(setActive), [])
+  useEffect(() => onSpeakingChange((speaking) => setActive(speaking && speakingText() === text)), [text])
 
   if (!supported || !text) return null
 
@@ -43,7 +44,7 @@ export default function SpeechButton({
         className
       )}
     >
-      <span aria-hidden>{active ? '⏹' : '🔊'}</span>
+      {active ? <Square className="h-4 w-4" aria-hidden="true" /> : <Volume2 className="h-5 w-5" aria-hidden="true" />}
       <span>{active ? '停止' : label}</span>
     </button>
   )

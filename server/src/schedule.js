@@ -1,5 +1,4 @@
 import { getDays, getMeta } from './content.js'
-import { config } from './config.js'
 
 /**
  * 日期驱动的排期。
@@ -35,8 +34,10 @@ export function todayStr() {
 
 /** YYYY-MM-DD → 当天 00:00 的 UTC 时间戳（按本地日历天计算天数差） */
 export function parseDate(str) {
+  if (typeof str !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(str)) return new Date(NaN)
   const [y, m, d] = str.split('-').map(Number)
-  return new Date(y, m - 1, d)
+  const date = new Date(y, m - 1, d)
+  return toDateStr(date) === str ? date : new Date(NaN)
 }
 
 export function daysBetween(fromStr, toStr) {
@@ -81,7 +82,7 @@ export function cycleRange(cycle) {
  */
 export function scheduleFor(dateStr) {
   const idx = dayIndex(dateStr)
-  if (idx < 1) return null
+  if (!Number.isFinite(idx) || idx < 1) return null
 
   const odd = idx % 2 === 1
   const languageSubject = odd ? 'chinese' : 'english'
@@ -105,8 +106,8 @@ export function scheduleFor(dateStr) {
 
 /** 今天（或指定日期）是否允许打开 */
 export function isUnlocked(dateStr) {
-  if (config.preview) return true
-  return dateStr <= todayStr()
+  if (!Number.isFinite(parseDate(dateStr).getTime())) return false
+  return dateStr === todayStr()
 }
 
 /** 列出锚点起的一段日期安排（首页日历用） */
@@ -133,15 +134,14 @@ export function contentFor(dateStr) {
   // 语文第 i 篇 = docx 第 i 天的语文；英语第 i 段 = docx 第 i 天的英语
   const chineseList = days.map((d) => d.chinese)
   const englishList = days.map((d) => d.english)
-  const exercisesList = days.map((d) => d.englishExercises)
+  const english = s.languageSubject === 'english' ? englishList[s.languageIndex - 1] || null : null
 
   return {
     schedule: s,
     math: mathDay ? mathDay.math : null,
     chinese: s.languageSubject === 'chinese' ? chineseList[s.languageIndex - 1] || null : null,
-    english: s.languageSubject === 'english' ? englishList[s.languageIndex - 1] || null : null,
-    englishExercises:
-      s.languageSubject === 'english' ? exercisesList[s.languageIndex - 1] || null : null,
+    english: english ? { ...english, dialogues: english.dialogues.slice(0, 1), sentences: [], task: '', tip: '', parentTip: '' } : null,
+    englishExercises: null,
     coding: codingDay ? codingDay.coding : null,
   }
 }

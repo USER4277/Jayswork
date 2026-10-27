@@ -1,94 +1,114 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { openCamera, openWatchSocket, Recorder, startFramePush } from '../lib/camera'
-import { onStartSession } from '../lib/session'
+import { openCamera, Recorder } from '../lib/camera'
+import { onStartSession, onHomeworkProgress, homeworkCompleted } from '../lib/session'
 import { api } from '../lib/api'
 import { cn } from '../lib/format'
+import { useMonitoring } from '../lib/monitoring'
 
-/**
- * 摄像头浮层：右上角显示实时画面，同时录像并把画面推给爸爸手机。
- *
- * 页面常驻一个「监控进行中」的指示 —— 这不是偷偷摸摸的功能，
- * 开始作业时孩子已经被语音告知过了，界面上也要看得见。
- */
 export default function CameraPiP() {
+  const { monitoring } = useMonitoring()
   const videoRef = useRef<HTMLVideoElement>(null)
   const recorderRef = useRef<Recorder | null>(null)
-  const pushRef = useRef<{ stop: () => void } | null>(null)
-  const socketRef = useRef<WebSocket | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const startingRef = useRef(false)
+  const recordingDateRef = useRef<string | null>(null)
+  const stopPromiseRef = useRef<Promise<void> | null>(null)
 
   const [active, setActive] = useState(false)
   const [minimized, setMinimized] = useState(false)
   const [error, setError] = useState('')
-  const [watching, setWatching] = useState(false)
+  const [stopping, setStopping] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
 
-  const stopEverything = useCallback(async () => {
-    pushRef.current?.stop()
-    pushRef.current = null
-    socketRef.current?.close()
-    socketRef.current = null
-    await recorderRef.current?.stop()
-    recorderRef.current = null
-    streamRef.current?.getTracks().forEach((t) => t.stop())
-    streamRef.current = null
-    setActive(false)
-    setWatching(false)
+  const stopEverything = useCallback(() => {
+    if (stopPromiseRef.current) return stopPromiseRef.current
+    recordingDateRef.current = null
+    setStopping(true)
+    const finishing = (async () => {
+      try {
+        await recorderRef.current?.stop()
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : '录像未完整保存')
+      } finally {
+        recorderRef.current = null
+        streamRef.current?.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
+        setActive(false)
+        setMinimized(false)
+        setSessionId(null)
+        setStopping(false)
+        stopPromiseRef.current = null
+      }
+    })()
+    stopPromiseRef.current = finishing
+    return finishing
   }, [])
+
+  const checkCompletion = useCallback(async (date: string) => {
+    if (recordingDateRef.current !== date) return
+    try {
+      const overview = await api.today(date)
+      if (recordingDateRef.current === date && overview.date === date && homeworkCompleted(overview)) await stopEverything()
+    } catch {
+      setError('暂时无法确认作业完成状态，录像仍在继续；可手动结束录像并保存。')
+    }
+  }, [stopEverything])
 
   const start = useCallback(
     async (date: string) => {
+      if (startingRef.current || streamRef.current || stopPromiseRef.current) return
+      startingRef.current = true
       setError('')
       try {
+        const settings = await api.settings()
+        if (!settings.monitoring) return
         const handle = await openCamera()
         streamRef.current = handle.stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = handle.stream
-          await videoRef.current.play().catch(() => {})
-        }
 
-        const { sessionId: sid } = await api.startSession(date)
+        const { sessionId: sid, uploadToken } = await api.startSession(date)
         setSessionId(sid)
 
-        const recorder = new Recorder(sid, date)
+        const recorder = new Recorder(sid, date, uploadToken)
         recorder.start(handle.stream, (msg) => setError(msg))
         recorderRef.current = recorder
-
-        const socket = openWatchSocket('child', sid, {
-          onStreaming: (on) => setWatching(on),
-          onClose: () => setWatching(false),
-        })
-        socketRef.current = socket
-
-        // 等 socket 打开再开始推帧
-        const waitOpen = () =>
-          new Promise<void>((resolve) => {
-            if (socket.readyState === WebSocket.OPEN) return resolve()
-            socket.addEventListener('open', () => resolve(), { once: true })
-            setTimeout(resolve, 1500)
-          })
-        await waitOpen()
-        if (videoRef.current) {
-          pushRef.current = startFramePush(videoRef.current, socket)
-        }
+        recordingDateRef.current = date
 
         setActive(true)
         setMinimized(false)
       } catch (err) {
+        streamRef.current?.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
+        setSessionId(null)
         setError(
           err instanceof Error
             ? err.message
             : '摄像头没能打开，可以先继续做题，再让家长帮忙打开监控。'
         )
-      }
+      } finally { startingRef.current = false }
     },
     []
   )
 
   useEffect(() => onStartSession((date) => void start(date)), [start])
+  useEffect(() => onHomeworkProgress((date) => void checkCompletion(date)), [checkCompletion])
+  useEffect(() => {
+    if (active && recordingDateRef.current) void checkCompletion(recordingDateRef.current)
+  }, [active, checkCompletion])
   useEffect(() => () => void stopEverything(), [stopEverything])
-
-  if (!active && !error) return null
+  useEffect(() => {
+    if (active && !monitoring) void stopEverything()
+  }, [active, monitoring, stopEverything])
+  useEffect(() => {
+    if (!active || !videoRef.current || !streamRef.current) return
+    videoRef.current.srcObject = streamRef.current
+    void videoRef.current.play().catch(() => setError('画面播放失败，请结束录像后重试'))
+  }, [active])
+  useEffect(() => {
+    if (!active) return
+    const confirmLeave = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', confirmLeave)
+    return () => window.removeEventListener('beforeunload', confirmLeave)
+  }, [active])
 
   return (
     <>
@@ -109,8 +129,7 @@ export default function CameraPiP() {
           {!minimized && (
             <div className="flex items-center gap-1 bg-black/70 px-2 py-1 text-[11px] text-white">
               <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
-              <span className="flex-1">监控进行中</span>
-              {watching && <span title="爸爸手机正在看">👁️</span>}
+              <span className="flex-1">{stopping ? '正在保存录像…' : '本机录像中'}</span>
               <button
                 type="button"
                 onClick={() => setMinimized(true)}
@@ -122,8 +141,10 @@ export default function CameraPiP() {
               <button
                 type="button"
                 onClick={() => void stopEverything()}
+                disabled={stopping}
                 className="rounded px-1 hover:bg-white/20"
-                aria-label="关闭监控"
+                aria-label="结束录像并保存"
+                title="结束录像并保存"
               >
                 ✕
               </button>
@@ -138,7 +159,7 @@ export default function CameraPiP() {
           onClick={() => setMinimized(false)}
           className="fixed right-3 top-3 z-40 flex h-9 w-9 items-center justify-center rounded-full border-2 border-red-400 bg-black text-white shadow-lg"
           aria-label="展开监控画面"
-          title="监控进行中"
+          title="本机录像中，点击展开"
         >
           <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
         </button>
@@ -150,7 +171,7 @@ export default function CameraPiP() {
             <div className="flex items-start gap-2">
               <span aria-hidden>⚠️</span>
               <div className="min-w-0 flex-1">
-                <p className="font-medium">监控没能打开</p>
+                <p className="font-medium">摄像头或录像提示</p>
                 <p className="mt-0.5 leading-relaxed">{error}</p>
                 <p className="mt-1 text-[12px] text-amber-700">
                   提示：摄像头需要用 localhost 打开，并且要允许浏览器使用摄像头。
@@ -171,7 +192,7 @@ export default function CameraPiP() {
 
       {sessionId && (
         <span className="sr-only" aria-live="polite">
-          监控会话 {sessionId} 进行中
+          本机录像 {sessionId} 进行中
         </span>
       )}
     </>

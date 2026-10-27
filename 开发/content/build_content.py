@@ -35,7 +35,7 @@ except ImportError:
     sys.exit("需要 python-docx：pip3 install python-docx")
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DOCX = ROOT.parent / "小学14天作业本_数学语文英语编程.docx"
+DEFAULT_DOCX = ROOT / "作业" / "小学14天作业本_数学语文英语编程.docx"
 
 IDEO_SPACE = "　"  # U+3000
 

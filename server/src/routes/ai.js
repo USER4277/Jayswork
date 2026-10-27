@@ -1,9 +1,11 @@
 import express from 'express'
 import { db, now } from '../db.js'
 import { chat, chatJson, streamChat, AiError } from '../ai.js'
-import { tutorPrompt, englishPrompt, weeklySummaryPrompt } from '../prompts.js'
+import { tutorPrompt, weeklySummaryPrompt } from '../prompts.js'
 import { loadGraph } from '../content.js'
 import { aiEnabled } from '../config.js'
+import { requireParent } from '../auth.js'
+import { cycleRange } from '../schedule.js'
 
 export const router = express.Router()
 
@@ -79,7 +81,7 @@ router.post('/chat', async (req, res) => {
 router.get('/chat/history', (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 30, 100)
   const rows = db
-    .prepare('SELECT role, content, created_at FROM chat_messages ORDER BY id DESC LIMIT ?')
+    .prepare("SELECT role, content, created_at FROM chat_messages WHERE COALESCE(json_extract(context_json, '$.kind'), '') != 'weekly-summary' ORDER BY id DESC LIMIT ?")
     .all(limit)
   res.json(rows.reverse())
 })
@@ -88,26 +90,17 @@ router.get('/chat/history', (req, res) => {
  * 英语跟读评分（把录音转写结果交给 AI 判）。
  * body: { sentence, translation, answer }
  */
-router.post('/english-grade', async (req, res) => {
-  const { sentence, translation, answer } = req.body || {}
-  if (!aiEnabled()) return res.status(503).json({ error: '还没有配置 AI' })
-  try {
-    const json = await chatJson(
-      englishPrompt({ sentence, translation, answer }),
-      { temperature: 0.2, maxTokens: 800 }
-    )
-    res.json(json)
-  } catch (err) {
-    res.status(502).json({ error: err.message })
-  }
+router.post('/english-grade', (req, res) => {
+  res.status(410).json({ error: '请从当天英语页面上传真实跟读录音评分，不能使用手填文字替代录音' })
 })
 
 /**
  * 生成某个 7 天周期的小结（家长向）。
  */
-router.post('/weekly-summary', async (req, res) => {
-  const { cycle, start, end } = req.body || {}
-  if (!cycle) return res.status(400).json({ error: '缺少周期号' })
+router.post('/weekly-summary', requireParent, async (req, res) => {
+  const cycle = Number(req.body?.cycle)
+  if (!Number.isInteger(cycle) || cycle < 1 || cycle > 100) return res.status(400).json({ error: '周期号不正确' })
+  const { start, end } = cycleRange(cycle)
   if (!aiEnabled()) return res.status(503).json({ error: '还没有配置 AI' })
 
   const rows = db

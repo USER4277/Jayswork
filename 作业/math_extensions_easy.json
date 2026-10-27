@@ -1,0 +1,58 @@
+[
+  { "day": 1, "questions": [
+    { "no": 9, "prompt": "【找规律】2、4、6、8、（ ）。每次都增加同样的数，下一个数是多少？", "reference": "答案：10。相邻两个数都相差2，所以8后面是8+2=10。", "answer": { "parts": [{ "kind": "number", "label": "下一个数", "value": 10 }], "aiText": false } },
+    { "no": 10, "prompt": "【图形接龙】圆、三角形、圆、三角形、（ ）。接下来应该是什么图形？", "reference": "答案：圆。每两个图形一组，按圆、三角形的顺序重复。", "answer": { "parts": [{ "kind": "choice", "label": "下一个图形", "options": ["圆", "三角形", "正方形"], "value": "圆" }], "aiText": false } }
+  ] },
+  { "day": 2, "questions": [
+    { "no": 9, "prompt": "【数独小练习】只有两个空格。每行、每列和每个2×2小方框都要有1、2、3、4，且不能重复。先看看每行缺哪个数。", "reference": "第一行最后一格填4，第三行第二格填1。完整四行是：1、2、3、4；3、4、1、2；2、1、4、3；4、3、2、1。", "figure": { "type": "sudoku", "rows": 4, "cols": 4, "boxRows": 2, "boxCols": 2, "values": 4 }, "answer": { "parts": [{ "kind": "grid", "label": "数独", "values": 4, "boxRows": 2, "boxCols": 2, "given": [["1","2","3",""],["3","4","1","2"],["2","","4","3"],["4","3","2","1"]] }], "aiText": false } },
+    { "no": 10, "prompt": "【凑十朋友】1和9凑成10，2和8凑成10。3要和几凑成10？", "reference": "答案：7。想3+几=10，或用10-3=7，就能找到3的凑十朋友。", "answer": { "parts": [{ "kind": "number", "label": "3的凑十朋友", "value": 7 }], "aiText": false } }
+  ] },
+  { "day": 3, "questions": [
+    { "no": 9, "prompt": "【小小购物员】你有10元，买一块3元的橡皮，还剩几元？可以画10个小圆点，再划去3个。", "reference": "答案：7元。原来的钱减去花掉的钱：10-3=7。", "answer": { "parts": [{ "kind": "number", "label": "还剩几元", "value": 7 }], "aiText": false } },
+    { "no": 10, "prompt": "【找不同】2、4、7、8中，哪个数不能分成相等的两份？提示：把每个数看成一些小圆点，试着两两分组。", "reference": "答案：7。2、4、8都能分成相等的两份；7分成两份时会多出1个。", "answer": { "parts": [{ "kind": "choice", "label": "不同的数", "options": ["2", "4", "7", "8"], "value": "7" }], "aiText": false } }
+  ] },
+  { "day": 4, "questions": [
+    { "no": 9, "prompt": "【比身高】小明比小红高，小红比小亮高。三个人中谁最高？可以画三条长短不同的线帮忙。", "reference": "答案：小明。从高到矮是小明、小红、小亮，所以小明最高。", "answer": { "parts": [{ "kind": "choice", "label": "最高的人", "options": ["小明", "小红", "小亮"], "value": "小明" }], "aiText": false } },
+    { "no": 10, "prompt": "【走格子】小兔站在第1格，每次向右走1格。走到第4格，一共要走几次？可以写下它经过的格子。", "reference": "答案：3次。第1格到第2格走1次，再到第3格、到第4格，共走3次。不要把起点也算作走过的一步。", "answer": { "parts": [{ "kind": "number", "label": "走几次", "value": 3 }], "aiText": false } }
+  ] },
+  { "day": 5, "questions": [
+    { "no": 9, "prompt": "【分贴纸】9张贴纸平均分给3个小朋友，每人分到几张？可以先每人发1张，再接着发。", "reference": "答案：3张。9÷3=3，也可以每人依次发1张，发3轮后正好分完。", "answer": { "parts": [{ "kind": "number", "label": "每人几张", "value": 3 }], "aiText": false } },
+    { "no": 10, "prompt": "【数一数边】一个三角形有3条边，一个正方形有4条边。这两个图形分开放，一共有几条边？", "reference": "答案：7条。图形分开放，没有共用的边，所以3+4=7。", "answer": { "parts": [{ "kind": "number", "label": "一共几条边", "value": 7 }], "aiText": false } }
+  ] },
+  { "day": 6, "questions": [
+    { "no": 9, "prompt": "【摆正方形】摆一个正方形要4根小棒。摆两个分开的正方形，小棒不能共用，一共要几根？", "reference": "答案：8根。两个正方形各用4根，4+4=8。题目说分开放，不能共用小棒。", "answer": { "parts": [{ "kind": "number", "label": "需要几根小棒", "value": 8 }], "aiText": false } },
+    { "no": 10, "prompt": "【一样多了吗】盒子里有4支铅笔和2支钢笔。拿走2支铅笔后，哪种笔更多？", "reference": "答案：一样多。铅笔剩4-2=2支，钢笔也是2支。", "answer": { "parts": [{ "kind": "choice", "label": "比较结果", "options": ["铅笔更多", "钢笔更多", "一样多"], "value": "一样多" }], "aiText": false } }
+  ] },
+  { "day": 7, "questions": [
+    { "no": 9, "prompt": "【小动物猜一猜】鸡和兔一共有3只，一共8只脚。鸡有2只脚，兔有4只脚。鸡、兔各有几只？提示：先试一试只有1只兔子的情况。", "reference": "答案：鸡2只，兔1只。2只鸡有4只脚，1只兔有4只脚，合起来3只动物、8只脚，两个条件都符合。", "answer": { "parts": [{ "kind": "number", "label": "鸡有几只", "value": 2 }, { "kind": "number", "label": "兔有几只", "value": 1 }], "aiText": false } },
+    { "no": 10, "prompt": "【摸球小游戏】袋子里只有红球和蓝球，两种球都很多。不看颜色，至少摸几个球，才能保证有两个球颜色相同？提示：前两个球可能一红一蓝。", "reference": "答案：3个。前两个最不巧时颜色不同，第3个不论红色还是蓝色，都能与前面的一个颜色相同。", "answer": { "parts": [{ "kind": "number", "label": "至少摸几个", "value": 3 }], "aiText": false } }
+  ] },
+  { "day": 8, "questions": [
+    { "no": 9, "prompt": "【五个五个数】5、10、15、20、（ ）。下一个数是多少？想想每次增加了几。", "reference": "答案：25。每次增加5，20+5=25。", "answer": { "parts": [{ "kind": "number", "label": "下一个数", "value": 25 }], "aiText": false } },
+    { "no": 10, "prompt": "【两枚骰子】一枚红骰子和一枚蓝骰子的点数加起来是4。有几种结果？提示：按红骰子是1、2、3的顺序试一试。", "reference": "答案：3种。红1蓝3、红2蓝2、红3蓝1。两枚骰子颜色不同，红1蓝3与红3蓝1算不同结果。", "answer": { "parts": [{ "kind": "number", "label": "一共有几种", "value": 3 }], "aiText": false } }
+  ] },
+  { "day": 9, "questions": [
+    { "no": 9, "prompt": "【积木变一变】有3块红积木和2块蓝积木。送给朋友1块红积木后，红积木还剩几块？两种积木一共剩几块？", "reference": "答案：红积木2块，一共4块。红积木3-1=2，再加2块蓝积木，2+2=4。", "answer": { "parts": [{ "kind": "number", "label": "红积木剩几块", "value": 2 }, { "kind": "number", "label": "一共剩几块", "value": 4 }], "aiText": false } },
+    { "no": 10, "prompt": "【排队找朋友】从左往右依次是：小红、小明、小亮。紧挨着小明左边的是谁？", "reference": "答案：小红。先找到中间的小明，再看他左边相邻的位置。", "answer": { "parts": [{ "kind": "choice", "label": "小明左边的人", "options": ["小红", "小亮"], "value": "小红" }], "aiText": false } }
+  ] },
+  { "day": 10, "questions": [
+    { "no": 9, "prompt": "【数正方形】下面是一个田字格，一共有几个正方形？提示：除了小正方形，还要看看最外面。", "reference": "答案：5个。4个小正方形加上最外面的1个大正方形，共4+1=5个。", "figure": { "type": "ascii", "lines": ["┌──┬──┐", "│  │  │", "├──┼──┤", "│  │  │", "└──┴──┘"] }, "answer": { "parts": [{ "kind": "number", "label": "一共有几个", "value": 5 }], "aiText": false } },
+    { "no": 10, "prompt": "【看时间】现在是下午3点30分。30分钟前是下午几点？", "reference": "答案：下午3点。3点30分往前退30分钟，正好回到3点整。", "answer": { "parts": [{ "kind": "number", "label": "下午几点", "value": 3 }], "aiText": false } }
+  ] },
+  { "day": 11, "questions": [
+    { "no": 9, "prompt": "【摆三角形】摆一个三角形需要3根小棒。摆两个分开的三角形，不共用小棒，需要几根？", "reference": "答案：6根。每个用3根，两个就是3+3=6根。", "answer": { "parts": [{ "kind": "number", "label": "需要几根", "value": 6 }], "aiText": false } },
+    { "no": 10, "prompt": "【水果天平】1个苹果和2个橘子一样重。2个苹果和几个橘子一样重？提示：把每个苹果都换成2个橘子。", "reference": "答案：4个橘子。一个苹果换2个橘子，两个苹果换2+2=4个橘子。", "answer": { "parts": [{ "kind": "number", "label": "几个橘子", "value": 4 }], "aiText": false } }
+  ] },
+  { "day": 12, "questions": [
+    { "no": 9, "prompt": "【图形小火车】圆、三角形、正方形、圆、三角形、（ ）。空位上是什么图形？", "reference": "答案：正方形。每3个图形一组，第4个又从圆开始，因此第6个是正方形。", "answer": { "parts": [{ "kind": "choice", "label": "空位上的图形", "options": ["圆", "三角形", "正方形"], "value": "正方形" }], "aiText": false } },
+    { "no": 10, "prompt": "【神秘小方框】□+3=8，方框里应该填几？可以先画8个圆点，再去掉3个。", "reference": "答案：5。用8-3=5求出原来的数，再检查5+3=8。", "answer": { "parts": [{ "kind": "number", "label": "方框里的数", "value": 5 }], "aiText": false } }
+  ] },
+  { "day": 13, "questions": [
+    { "no": 9, "prompt": "【买文具】你有6元，买2支铅笔，每支2元。剩下的钱还能买几块1元的橡皮？", "reference": "答案：2块。2支铅笔花2+2=4元，还剩6-4=2元，能买2块1元的橡皮。", "answer": { "parts": [{ "kind": "number", "label": "能买几块橡皮", "value": 2 }], "aiText": false } },
+    { "no": 10, "prompt": "【颜色接龙】黑、白、黑、白、黑、（ ）。空位上应该是什么颜色？", "reference": "答案：白。黑、白两个颜色轮流出现，黑后面接白。", "answer": { "parts": [{ "kind": "choice", "label": "空位上的颜色", "options": ["黑", "白"], "value": "白" }], "aiText": false } }
+  ] },
+  { "day": 14, "questions": [
+    { "no": 9, "prompt": "【单数接龙】1、3、5、7、（ ）。下一个数是多少？", "reference": "答案：9。每次增加2，7+2=9。", "answer": { "parts": [{ "kind": "number", "label": "下一个数", "value": 9 }], "aiText": false } },
+    { "no": 10, "prompt": "【数字比大小】12、21、20这三个数中，哪个最大？提示：先比较十位，十位相同再比较个位。", "reference": "答案：21。21和20的十位都是2，比12大；再比较个位，1比0大，所以21最大。", "answer": { "parts": [{ "kind": "choice", "label": "最大的数", "options": ["12", "21", "20"], "value": "21" }], "aiText": false } }
+  ] }
+]

@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { config } from './config.js'
 
@@ -10,7 +11,27 @@ import { config } from './config.js'
 fs.mkdirSync(config.dataDir, { recursive: true })
 export const DB_PATH = path.join(config.dataDir, 'app.db')
 
+const existingDatabase = fs.existsSync(DB_PATH)
 export const db = new DatabaseSync(DB_PATH)
+db.exec('PRAGMA busy_timeout = 5000')
+
+export function backupDatabase() {
+  const directory = path.join(config.dataDir, 'backups')
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
+  const destination = path.join(directory, `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomUUID()}.db`)
+  const temporary = `${destination}.partial`
+  try {
+    db.prepare('VACUUM INTO ?').run(temporary)
+    fs.chmodSync(temporary, 0o600)
+    fs.renameSync(temporary, destination)
+    return destination
+  } catch (error) {
+    fs.rmSync(temporary, { force: true })
+    throw error
+  }
+}
+
+if (existingDatabase) backupDatabase()
 
 db.exec('PRAGMA journal_mode = WAL')
 db.exec('PRAGMA foreign_keys = ON')
@@ -101,6 +122,16 @@ CREATE TABLE IF NOT EXISTS settings (
   k TEXT PRIMARY KEY,
   v TEXT
 );
+
+CREATE TABLE IF NOT EXISTS voice_answers (
+  id TEXT PRIMARY KEY,
+  date TEXT NOT NULL,
+  question_key TEXT NOT NULL,
+  transcript TEXT NOT NULL DEFAULT '',
+  audio_path TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `)
 
 export const now = () => new Date().toISOString()
@@ -115,6 +146,9 @@ function ensureColumn(table, column, ddl) {
 
 // wrong_items.kind 区分「完全错了」和「基本对但没答全」
 ensureColumn('wrong_items', 'kind', "TEXT NOT NULL DEFAULT 'wrong'")
+ensureColumn('attempts', 'result_json', 'TEXT')
+ensureColumn('sessions', 'upload_token', 'TEXT')
+ensureColumn('sessions', 'next_chunk', 'INTEGER NOT NULL DEFAULT 0')
 
 export function getSetting(k, fallback = null) {
   const row = db.prepare('SELECT v FROM settings WHERE k = ?').get(k)

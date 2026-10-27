@@ -22,6 +22,56 @@ export function loadHomework() {
     )
   }
   homework = JSON.parse(fs.readFileSync(file, 'utf-8'))
+  const answerFile = path.join(config.contentDir, 'chinese_answers.json')
+  if (fs.existsSync(answerFile)) {
+    const references = JSON.parse(fs.readFileSync(answerFile, 'utf-8'))
+    for (const day of homework.days) {
+      if (!day.chinese) continue
+      const reference = references.find((item) => item.title === day.chinese.title)
+      for (const question of day.chinese.questions) {
+        const answer = reference?.answers.find((item) => item.no === question.no)
+        if (answer) Object.assign(question, { reference: answer.answer, explanation: answer.explanation })
+      }
+    }
+  }
+  const extensionFile = path.join(config.contentDir, 'math_extensions_easy.json')
+  if (fs.existsSync(extensionFile)) {
+    const extensions = JSON.parse(fs.readFileSync(extensionFile, 'utf-8'))
+    for (const day of homework.days) {
+      const replacement = extensions.find((item) => item.day === day.day)
+      const group = day.math?.groups.find((item) => item.key === 'extend')
+      if (replacement && group) group.questions = replacement.questions.map((question) => ({ ...question, version: 'easy-v1' }))
+    }
+  }
+  const milestoneFile = path.join(config.contentDir, 'coding_milestones.json')
+  const solutionFile = path.join(config.contentDir, 'math_word_solutions.json')
+  if (fs.existsSync(solutionFile)) {
+    const solutions = JSON.parse(fs.readFileSync(solutionFile, 'utf-8'))
+    for (const solution of solutions) {
+      const question = homework.days.find((day) => day.day === solution.day)?.math?.groups.find((group) => group.key === 'word')?.questions.find((item) => item.no === solution.no)
+      if (!question) continue
+      question.explanation = solution.steps
+      if (solution.answer !== undefined) {
+        question.answer.parts[0].value = solution.answer
+        question.reference = solution.steps.join('\n')
+        question.version = 'corrected-v1'
+      }
+    }
+  }
+  if (fs.existsSync(milestoneFile)) {
+    const milestones = JSON.parse(fs.readFileSync(milestoneFile, 'utf-8'))
+    for (const day of homework.days) {
+      const milestone = milestones.find((item) => item.day === day.day)
+      if (!day.coding || !milestone) continue
+      Object.assign(day.coding, {
+        dayTitle: milestone.title,
+        goal: milestone.goal,
+        features: milestone.features,
+        playtest: milestone.playtest,
+        readFirst: '', steps: [], prompts: [], saveTip: '', selfCheck: milestone.playtest,
+      })
+    }
+  }
   return homework
 }
 

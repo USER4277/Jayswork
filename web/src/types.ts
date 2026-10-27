@@ -73,6 +73,7 @@ export interface ChineseQuestion {
   no: number
   prompt: string
   reference: string
+  explanation?: string
 }
 
 export interface ChineseContent {
@@ -118,6 +119,8 @@ export interface CodingContent {
   dayNo: number | null
   dayTitle: string
   goal: string
+  features?: string[]
+  playtest?: string
   readFirst: string
   steps: string[]
   prompts: { label: string; text: string }[]
@@ -161,6 +164,23 @@ export interface GradeResult {
   expected?: string
   actual?: string
   pendingAi?: boolean
+  source?: 'local-reference'
+  referenceAnswer?: string
+  explanation?: string
+  workedSolution?: {
+    title: string
+    steps: string[]
+    column?: {
+      upper: string
+      lower: string
+      operator: '+' | '-'
+      result: string
+      carries: (number | null)[]
+      adjusted: (number | null)[]
+      borrowMarks: boolean[]
+      steps: string[]
+    }
+  } | null
   ai?: AiFeedback
 }
 

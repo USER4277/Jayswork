@@ -9,6 +9,7 @@ type SpeakHandler = (speaking: boolean) => void
 
 const listeners = new Set<SpeakHandler>()
 let speaking = false
+let activeUtterance: SpeechSynthesisUtterance | null = null
 
 function notify(next: boolean) {
   speaking = next
@@ -24,6 +25,7 @@ export function onSpeakingChange(fn: SpeakHandler) {
 }
 
 export const isSpeaking = () => speaking
+export const speakingText = () => activeUtterance?.text ?? ''
 
 export function speechSupported() {
   return typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -58,21 +60,28 @@ export function speak(text: string, options: SpeakOptions = {}) {
   if (!speechSupported() || !text) return
   const { lang = 'zh-CN', rate = 0.95, pitch = 1, onEnd } = options
 
-  window.speechSynthesis.cancel()
+  stopSpeaking()
 
   const utter = new SpeechSynthesisUtterance(text)
+  activeUtterance = utter
   utter.lang = lang
   utter.rate = rate
   utter.pitch = pitch
   const voice = pickVoice(lang)
   if (voice) utter.voice = voice
 
-  utter.onstart = () => notify(true)
+  utter.onstart = () => {
+    if (activeUtterance === utter) notify(true)
+  }
   utter.onend = () => {
+    if (activeUtterance !== utter) return
+    activeUtterance = null
     notify(false)
     onEnd?.()
   }
   utter.onerror = () => {
+    if (activeUtterance !== utter) return
+    activeUtterance = null
     notify(false)
     onEnd?.()
   }
@@ -82,6 +91,7 @@ export function speak(text: string, options: SpeakOptions = {}) {
 
 export function stopSpeaking() {
   if (!speechSupported()) return
+  activeUtterance = null
   window.speechSynthesis.cancel()
   notify(false)
 }

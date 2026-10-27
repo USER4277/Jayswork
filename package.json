@@ -9,6 +9,8 @@
     "content": "python3 开发/content/build_content.py && python3 开发/content/build_graph.py",
     "dev": "node 开发/dev.mjs",
     "build": "npm --prefix web run build",
+    "test": "node --test server/test/*.test.js",
+    "check": "npm test && npm run build",
     "start": "npm --prefix server start",
     "typecheck": "npm --prefix web exec tsc -- --noEmit"
   }

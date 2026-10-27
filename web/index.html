@@ -1,9 +1,16 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#f8fafc" />
+    <meta name="theme-color" content="#151b19" />
+    <script>
+      try {
+        const theme = localStorage.getItem('jayswork:theme') === 'light' ? 'light' : 'dark'
+        document.documentElement.dataset.theme = theme
+        document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#151b19' : '#f8fafc'
+      } catch {}
+    </script>
     <title>曹昌洵专属教育系统</title>
     <!-- 知识点图谱用本地 vendor 的 cytoscape + dagre，不访问任何 CDN -->
     <script src="/vendor/cytoscape.min.js"></script>

@@ -19,6 +19,7 @@ subject 要靠 id 前缀推断（数学 topic 没有 subject 字段）。
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -41,13 +42,32 @@ def load(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", default=str(DEFAULT_SRC))
+    ap.add_argument("--src")
     ap.add_argument("--out", default=str(ROOT / "教学"))
     args = ap.parse_args()
 
-    src = Path(args.src)
+    src = Path(args.src) if args.src else DEFAULT_SRC
     data = src / "data"
     if not (data / "topics.json").exists():
+        if not args.src:
+            bundled = ROOT / "教学"
+            names = ["manifest.json", "standards.json"]
+            for subject in PRIMARY_PREFIX:
+                names.extend("%s.%s.json" % (kind, subject) for kind in ("topics", "dependencies", "questions"))
+            for name in names:
+                file = bundled / name
+                if not file.exists():
+                    sys.exit("缺少随项目提供的图谱文件：%s；请用 --src 指定源仓库" % file)
+                value = load(file)
+                if not isinstance(value, (list, dict)) or not value:
+                    sys.exit("图谱文件无效：%s" % file)
+            out = Path(args.out)
+            out.mkdir(parents=True, exist_ok=True)
+            if out.resolve() != bundled.resolve():
+                for name in names:
+                    shutil.copy2(bundled / name, out / name)
+            print("✓ 未提供外部源仓库，已校验并使用项目自带的知识点数据：%s" % out)
+            return
         sys.exit("找不到源数据：%s" % (data / "topics.json"))
 
     out = Path(args.out)

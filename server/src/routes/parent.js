@@ -5,11 +5,13 @@ import crypto from 'node:crypto'
 import { db, now, getSetting, setSetting, allSettings } from '../db.js'
 import { config } from '../config.js'
 import { getDays } from '../content.js'
+import { loginParent, logoutParent, requireParent, invalidateParentSessions } from '../auth.js'
 
 export const router = express.Router()
 
 const PIN_KEY = 'parent.pin'
 const hash = (s) => crypto.createHash('sha256').update(String(s)).digest('hex')
+const loginAttempts = new Map()
 
 /** 首次使用时把 .env 里的 PIN 写进数据库，之后以数据库为准 */
 function ensurePin() {
@@ -19,11 +21,25 @@ function ensurePin() {
 /** 校验家长 PIN */
 router.post('/login', (req, res) => {
   ensurePin()
+  const address = req.socket.remoteAddress
+  for (const [key, attempt] of loginAttempts) if (attempt.until < Date.now()) loginAttempts.delete(key)
+  const attempts = loginAttempts.get(address)
+  if (attempts?.count >= 10) return res.status(429).json({ error: '尝试次数过多，请 5 分钟后再试' })
   const pin = String(req.body?.pin ?? '')
   const ok = hash(pin) === getSetting(PIN_KEY)
-  if (ok) setSetting('parent.session', { at: now() })
+  if (ok) {
+    loginAttempts.delete(address)
+    loginParent(req, res)
+  } else loginAttempts.set(address, { count: (attempts?.count || 0) + 1, until: attempts?.until || Date.now() + 300000 })
   res.json({ ok })
 })
+
+router.post('/logout', (req, res) => {
+  logoutParent(req, res)
+  res.json({ ok: true })
+})
+
+router.use(requireParent)
 
 /** 家长设置 */
 router.get('/settings', (req, res) => {
@@ -34,8 +50,8 @@ router.get('/settings', (req, res) => {
   res.json({
     ...settings,
     effective: {
-      deadline: config.dailyDeadline,
-      speechScoring: config.speechScoring,
+      deadline: getSetting('deadline', config.dailyDeadline),
+      speechScoring: getSetting('speechScoring', config.speechScoring),
       aiEnabled: Boolean(config.ai.apiKey),
     },
   })
@@ -44,11 +60,18 @@ router.get('/settings', (req, res) => {
 router.put('/settings', (req, res) => {
   ensurePin()
   const { deadline, monitoring, pin, speechScoring, referenceUnlocked } = req.body || {}
+  if (deadline !== undefined && (typeof deadline !== 'string' || (deadline !== '' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(deadline)))) return res.status(400).json({ error: '截止时间格式应为 HH:MM' })
+  if (pin !== undefined && pin !== '' && !/^\d{4,6}$/.test(String(pin))) return res.status(400).json({ error: 'PIN 需要 4 到 6 位数字' })
+  if ([monitoring, speechScoring, referenceUnlocked].some((value) => value !== undefined && typeof value !== 'boolean')) return res.status(400).json({ error: '开关设置必须为布尔值' })
   if (deadline !== undefined) setSetting('deadline', deadline)
   if (monitoring !== undefined) setSetting('monitoring', monitoring)
   if (speechScoring !== undefined) setSetting('speechScoring', speechScoring)
   if (referenceUnlocked !== undefined) setSetting('referenceUnlocked', referenceUnlocked)
-  if (pin) setSetting(PIN_KEY, hash(pin))
+  if (pin) {
+    setSetting(PIN_KEY, hash(pin))
+    invalidateParentSessions()
+    loginParent(req, res)
+  }
   res.json({ ok: true })
 })
 
@@ -131,11 +154,12 @@ router.get('/recordings', (req, res) => {
   res.json({ items })
 })
 
-router.get('/recordings/:file', (req, res) => {
-  const rel = req.params.file
-  const full = path.join(RECORDING_DIR, rel)
+router.get('/recordings/:date/:file', (req, res) => {
+  const { date, file } = req.params
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^[a-f0-9-]+\.webm$/.test(file)) return res.status(404).json({ error: '找不到这个录像' })
+  const full = path.resolve(RECORDING_DIR, date, file)
   // 防目录穿越
-  if (!full.startsWith(RECORDING_DIR) || !fs.existsSync(full)) {
+  if (!full.startsWith(RECORDING_DIR + path.sep) || !fs.existsSync(full)) {
     return res.status(404).json({ error: '找不到这个录像' })
   }
   res.setHeader('Content-Type', 'video/webm')

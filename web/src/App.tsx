@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom'
+import { homeworkSessionStarted } from './lib/session'
 import Layout from './components/Layout'
 import HomePage from './pages/HomePage'
 import MathPage from './pages/MathPage'
@@ -9,21 +10,26 @@ import WrongBookPage from './pages/WrongBookPage'
 import GraphPage from './pages/GraphPage'
 import ReportPage from './pages/ReportPage'
 import ParentPage from './pages/ParentPage'
-import WatchPage from './pages/WatchPage'
 import LearnCenterPage from './pages/LearnCenterPage'
+
+function HomeworkSession() {
+  const { date = '' } = useParams()
+  return homeworkSessionStarted(date) ? <Outlet /> : <Navigate to="/" replace />
+}
 
 export default function App() {
   return (
     <Routes>
-      {/* 观看页独立出来，方便爸爸手机直接打开 */}
-      <Route path="/watch" element={<WatchPage />} />
+      <Route path="/watch" element={<Navigate to="/parent" replace />} />
 
       <Route element={<Layout />}>
         <Route path="/" element={<HomePage />} />
-        <Route path="/math/:date" element={<MathPage />} />
-        <Route path="/chinese/:date" element={<ChinesePage />} />
-        <Route path="/english/:date" element={<EnglishPage />} />
-        <Route path="/coding/:date" element={<CodingPage />} />
+        <Route element={<HomeworkSession />}>
+          <Route path="/math/:date" element={<MathPage />} />
+          <Route path="/chinese/:date" element={<ChinesePage />} />
+          <Route path="/english/:date" element={<EnglishPage />} />
+          <Route path="/coding/:date" element={<CodingPage />} />
+        </Route>
         <Route path="/wrong" element={<WrongBookPage />} />
         <Route path="/learn" element={<LearnCenterPage />} />
         <Route path="/graph" element={<GraphPage />} />

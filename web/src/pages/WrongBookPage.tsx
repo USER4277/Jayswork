@@ -12,27 +12,6 @@ const TABS = [
   { key: 'coding', label: '编程' },
 ]
 
-/** 把答案里的数字都取出来 */
-function numbersOf(text: string): number[] {
-  const found = text.match(/-?\d+(?:\.\d+)?/g)
-  return found ? found.map(Number) : []
-}
-
-/** 孩子写的答案和标准答案对不对得上 */
-function isAnswerCorrect(typed: string, expected: string): boolean {
-  const t = typed.trim().toLowerCase()
-  const e = expected.trim().toLowerCase()
-  if (!t || !e) return false
-  const want = numbersOf(e)
-  if (want.length) {
-    const got = numbersOf(t)
-    // 写了数字就按数字比，避免「14」被当成「4」
-    if (got.length) return got.some((n) => want.some((w) => Math.abs(n - w) < 1e-9))
-    return e.includes(t)
-  }
-  return t === e || t.includes(e) || e.includes(t)
-}
-
 interface CardProps {
   item: WrongItem
   today: string
@@ -132,7 +111,7 @@ function WrongCard({
               return name ? (
                 <Link
                   key={kp}
-                  to={`/graph?topic=${kp}`}
+                  to={`/graph?subject=${item.subject}&topic=${kp}`}
                   className={cn(chip, 'hover:text-[var(--color-math)]')}
                 >
                   {name}
@@ -199,6 +178,7 @@ function WrongCard({
         )}
 
         <div className="flex flex-wrap gap-2 pt-0.5">
+          <Link className="rounded-lg px-3 py-1.5 text-[13px] underline" to={`/${item.subject}/${item.date}`}>回原题订正</Link>
           <button
             className="rounded-lg bg-[var(--color-math)] px-3 py-1.5 text-[13px] font-medium text-white"
             onClick={onToggleRetry}
@@ -281,20 +261,21 @@ export default function WrongBookPage() {
       const value = (typed[item.id] ?? '').trim()
       if (!value) return
       setBusyId(item.id)
-      const correct = isAnswerCorrect(value, item.correctAnswer)
       try {
-        const r = await api.retryWrong(item.id, correct)
+        const r = await api.retryWrong(item.id, value)
+        const correct = r.correct
         // 后端规则：答对了就不再算「已掌握」，并安排好下一次复习的日子
         patchItem(item.id, {
           nextReviewDate: r.nextReviewDate,
-          due: false,
-          mastery: correct ? 0 : item.mastery,
+          due: r.pending ? item.due : false,
+          mastery: r.mastery ?? item.mastery,
+          wrongCount: item.wrongCount + (!correct && !r.pending ? 1 : 0),
         })
         setResult((prev) => ({
           ...prev,
           [item.id]: {
             correct,
-            message: correct
+            message: r.pending ? r.message || '等待 AI 老师批改' : correct
               ? '答对啦！这道题已经安排好下次复习的日子，太棒了！'
               : '这次还没对，没关系～看看讲解，过一天我们再来一次。',
           },
@@ -348,19 +329,18 @@ export default function WrongBookPage() {
 
   /* 错题里存的是知识点编号，这里换成看得懂的名字 */
   const needTopicNames = useMemo(
-    () => allItems.some((i) => i.knowledgePoint.some((k) => /^cnm_p\d+$/.test(k))),
+    () => allItems.some((i) => i.knowledgePoint.some((k) => /^cn[mec]_p\d+$/.test(k))),
     [allItems]
   )
 
   useEffect(() => {
     if (!needTopicNames) return
     let cancelled = false
-    api
-      .topics('math', 6)
-      .then((r) => {
+    Promise.all(['math', 'chinese', 'english'].map((subject) => api.topics(subject, 6)))
+      .then((rows) => {
         if (cancelled) return
         const map: Record<string, string> = {}
-        for (const t of r.topics) map[t.id] = t.name
+        for (const row of rows) for (const topic of row.topics) map[topic.id] = topic.name
         setTopicNames(map)
       })
       .catch(() => {

@@ -1,8 +1,14 @@
 import express from 'express'
 import { loadGraph, loadStandards } from '../content.js'
-import { extractNumber } from '../grading.js'
+import { normalize } from '../grading.js'
 
 export const router = express.Router()
+
+router.use((req, res, next) => {
+  const subject = req.query.subject || req.body?.subject || 'math'
+  if (!['math', 'chinese', 'english'].includes(subject)) return res.status(400).json({ error: '科目不正确' })
+  next()
+})
 
 /**
  * 知识点图谱。
@@ -109,9 +115,9 @@ router.post('/practice', (req, res) => {
   if (q.type === 'choice') {
     correct = String(answer || '').trim() === String(q.answer || '').trim()
   } else {
-    const num = extractNumber(answer)
-    const want = extractNumber(q.answer)
-    correct = num !== null && want !== null && num === want
+    const value = normalize(answer)
+    const expected = normalize(q.answer)
+    correct = /^-?\d+(?:\.\d+)?$/.test(value) && Number(value) === Number(expected)
   }
 
   res.json({

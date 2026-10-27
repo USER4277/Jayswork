@@ -9,13 +9,14 @@ import type {
   WrongGroup,
   Subject,
 } from '../types'
+import { emitHomeworkProgress } from './session'
 
 const BASE = '/api'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    headers: { ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(init?.headers || {}) },
   })
   const text = await res.text()
   const data = text ? JSON.parse(text) : {}
@@ -28,15 +29,20 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     err.locked = data?.locked
     throw err
   }
+  if (init?.method === 'POST' && ['/homework/submit', '/homework/correct', '/homework/english-complete', '/homework/coding-complete'].includes(path) && typeof init.body === 'string') {
+    const { date } = JSON.parse(init.body)
+    if (typeof date === 'string') emitHomeworkProgress(date)
+  }
   return data as T
 }
 
 export interface TodayOverview {
   date: string
-  schedule: Schedule
+  schedule: Schedule | null
   locked: boolean
   hasMath: boolean
   hasChinese: boolean
+  chineseUnlocked: boolean
   hasEnglish: boolean
   hasCoding: boolean
   progress: { subject: Subject; status: string; score: number; total: number }[]
@@ -48,6 +54,23 @@ export interface CalendarItem extends Schedule {
   isToday: boolean
 }
 
+export interface VoiceAnswer {
+  id: string
+  date: string
+  questionKey: string
+  transcript: string
+  mimeType: string
+  createdAt: string
+  url: string
+}
+
+export interface EnglishReading {
+  recording: { id: string; transcript: string; url: string } | null
+  result: { voiceId: string; score: number; passed: boolean; explanation: string; hint: string; transcript: string; assessmentType: 'transcript-content' } | null
+}
+
+const englishReadingPath = (date: string, line?: number) => `/homework/english-reading/${date}${line === undefined ? '' : `/line/${line}`}`
+
 export const api = {
   today: (date?: string) =>
     req<TodayOverview>(`/homework/today${date ? `?date=${date}` : ''}`),
@@ -57,7 +80,40 @@ export const api = {
       `/homework/calendar?start=${start || ''}&count=${count}`
     ),
 
-  day: (date: string) => req<DayContent>(`/homework/date/${date}`),
+  day: (date: string, subject?: Subject) => req<DayContent>(`/homework/date/${date}${subject ? `?subject=${subject}` : ''}`),
+
+  correct: (date: string, subject: Subject, questionKey: string, answer: unknown) =>
+    req<SubmitResult>('/homework/correct', { method: 'POST', body: JSON.stringify({ date, subject, questionKey, answers: { [questionKey]: answer } }) }),
+
+  voiceAnswers: (date: string) => req<{ items: VoiceAnswer[] }>(`/homework/voice/${date}`),
+
+  saveVoice: (date: string, questionKey: string, audio: Blob, transcript: string) => {
+    const body = new FormData()
+    body.append('audio', audio, 'answer.webm')
+    body.append('transcript', transcript)
+    return req<VoiceAnswer>(`/homework/voice/${date}/${questionKey}`, { method: 'POST', body })
+  },
+
+  attempts: (date: string, subject: Subject) =>
+    req<{ answers: Record<string, { parts?: { label: string; value: unknown }[]; text?: string; value?: string }>; result: SubmitResult | null }>(`/homework/attempts/${date}/${subject}`),
+
+  settings: () => req<{ monitoring: boolean; deadline: string; speechScoring: boolean }>('/homework/settings'),
+
+  codingComplete: (date: string) => req<{ ok: boolean }>('/homework/coding-complete', { method: 'POST', body: JSON.stringify({ date, playtested: true }) }),
+
+  englishComplete: (date: string) => req<{ ok: boolean }>('/homework/english-complete', { method: 'POST', body: JSON.stringify({ date, completed: true }) }),
+
+  englishReading: (date: string, line?: number) => req<EnglishReading>(englishReadingPath(date, line)),
+
+  gradeEnglishReading: (date: string, audio: Blob, line?: number) => {
+    const body = new FormData()
+    body.append('audio', audio, 'reading.webm')
+    return req<EnglishReading>(englishReadingPath(date, line), { method: 'POST', body })
+  },
+
+  retryEnglishReading: (date: string, voiceId: string, line?: number) => req<EnglishReading>(`${englishReadingPath(date, line)}/retry`, { method: 'POST', body: JSON.stringify({ voiceId }) }),
+
+  references: () => req<{ items: { project: string; title: string; unlocked: boolean; url: string }[] }>('/homework/references'),
 
   submit: (date: string, subject: Subject, answers: Record<string, unknown>) =>
     req<SubmitResult>('/homework/submit', {
@@ -96,10 +152,10 @@ export const api = {
       body: JSON.stringify({ mastered }),
     }),
 
-  retryWrong: (id: number, correct: boolean) =>
-    req<{ ok: boolean; nextReviewDate: string }>(`/review/wrong/${id}/retry`, {
+  retryWrong: (id: number, answer: string) =>
+    req<{ ok: boolean; correct: boolean; pending?: boolean; message?: string; mastery?: number; nextReviewDate: string }>(`/review/wrong/${id}/retry`, {
       method: 'POST',
-      body: JSON.stringify({ correct }),
+      body: JSON.stringify({ answer }),
     }),
 
   report: (from?: string) => req<ReportData>(`/review/report${from ? `?from=${from}` : ''}`),
@@ -120,17 +176,22 @@ export const api = {
 
   parentLogin: (pin: string) => req<{ ok: boolean }>('/parent/login', { method: 'POST', body: JSON.stringify({ pin }) }),
 
+  parentLogout: () => req<{ ok: boolean }>('/parent/logout', { method: 'POST', body: '{}' }),
+
   parentSettings: () => req<Record<string, unknown>>('/parent/settings'),
 
-  parentSettingsSave: (patch: Record<string, unknown>) =>
-    req<{ ok: boolean }>('/parent/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+  parentSettingsSave: async (patch: Record<string, unknown>) => {
+    const result = await req<{ ok: boolean }>('/parent/settings', { method: 'PUT', body: JSON.stringify(patch) })
+    window.dispatchEvent(new Event('jayswork:settings'))
+    return result
+  },
 
   parentAnswers: () => req<ParentAnswerDay[]>('/parent/answers'),
 
   recordings: () => req<{ items: { file: string; date: string; size: number; mtime: string }[] }>('/parent/recordings'),
 
   startSession: (date: string) =>
-    req<{ sessionId: string; date: string }>('/watch/sessions', { method: 'POST', body: JSON.stringify({ date }) }),
+    req<{ sessionId: string; date: string; uploadToken: string }>('/watch/sessions', { method: 'POST', body: JSON.stringify({ date }) }),
 }
 
 export interface ParentAnswerDay {

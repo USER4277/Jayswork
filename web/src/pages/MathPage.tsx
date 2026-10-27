@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { Fragment, useMemo, useState } from 'react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { AnswerPart, DayContent, MathQuestion, SubmitResult } from '../types'
+import type { AnswerPart, MathQuestion, GradeResult, SubmitResult } from '../types'
 import { cn, formatDate } from '../lib/format'
-import SpeechButton from '../components/SpeechButton'
 import SudokuGrid from '../components/SudokuGrid'
 import AsciiFigure from '../components/AsciiFigure'
 import FeedbackCard from '../components/FeedbackCard'
+import SubjectFlow from '../components/SubjectFlow'
+import { useHomework } from '../lib/homework'
+import { speak } from '../lib/speech'
+import VoiceInput from '../components/VoiceInput'
 
 interface AnswerState {
   parts: { label: string; value: unknown }[]
@@ -23,18 +26,10 @@ const GROUP_HINTS: Record<string, string> = {
 
 export default function MathPage() {
   const { date = '' } = useParams()
-  const [day, setDay] = useState<DayContent | null>(null)
-  const [answers, setAnswers] = useState<Record<string, AnswerState>>({})
-  const [result, setResult] = useState<SubmitResult | null>(null)
+  const { day, answers, setAnswers, result, setResult, error, setError, correctingKey, submitCorrection } = useHomework<AnswerState>(date, 'math')
+  const navigate = useNavigate()
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    api
-      .day(date)
-      .then(setDay)
-      .catch((err) => setError(err.message))
-  }, [date])
+  const [voiceKey, setVoiceKey] = useState<string | null>(null)
 
   const math = day?.math
 
@@ -54,12 +49,21 @@ export default function MathPage() {
     setAnswers((prev) => ({ ...prev, [key]: { ...(prev[key] ?? { parts: [] }), text } }))
   }
 
+  const advance = (next: SubmitResult) => {
+    if (!day || !next.total || next.correct !== next.total || next.results.some((item) => item.status !== 'correct' || item.pendingAi)) return
+    const subject = day.schedule.languageSubject
+    navigate(`/${subject}/${date}`)
+    speak(subject === 'chinese' ? '下面开始今日的语文作业' : '下面开始今日的英语作业', { lang: 'zh-CN' })
+  }
+
   const submit = async () => {
+    if (voiceKey) return
     setSubmitting(true)
     setError('')
     try {
       const r = await api.submit(date, 'math', answers)
       setResult(r)
+      advance(r)
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err) {
       setError(err instanceof Error ? err.message : '提交失败了')
@@ -68,13 +72,13 @@ export default function MathPage() {
     }
   }
 
-  const retry = (key: string) => {
-    setResult((prev) =>
-      prev ? { ...prev, results: prev.results.filter((r) => r.key !== key) } : prev
-    )
+  const correct = async (key: string) => {
+    if (voiceKey) return
+    const next = await submitCorrection(key)
+    if (next) advance(next)
   }
 
-  if (error) {
+  if (error && !day) {
     return (
       <div className="card mx-auto max-w-md p-6 text-center">
         <p className="text-sm text-amber-700">{error}</p>
@@ -151,16 +155,18 @@ export default function MathPage() {
               <p className="mt-0.5 text-[13px] text-[var(--color-ink-soft)]">
                 {result.wrongCount > 0
                   ? '错的题下面有讲解，读不懂可以点「听讲解」。'
-                  : '全对！真厉害。'}
+                    : result.pending > 0 ? '已提交，开放题等待 AI 批改。' : '全对！真厉害。'}
               </p>
+                  {result.correct === result.total && !result.results.some((item) => item.pendingAi) ? <div className="mt-3"><SubjectFlow day={day} date={date} subject="math" /></div> : <p className="mt-2 text-sm">请逐题订正，全部答对后进入下一科。{result.results.some((item) => item.pendingAi) && '计算过程仍需 AI 核对。'}</p>}
             </div>
           </div>
         </section>
       )}
 
+      <fieldset disabled={submitting || Boolean(correctingKey)} className="min-w-0 space-y-5">
       {groups.map((group) => (
         <section key={group.key} className="space-y-3">
-          <div className="flex items-baseline gap-2">
+          <div className="flex flex-wrap items-baseline gap-2">
             <h2 className="text-[15px] font-semibold">{group.title}</h2>
             <span className="text-[12px] text-[var(--color-ink-soft)]">
               {GROUP_HINTS[group.key] ?? group.hint}
@@ -178,28 +184,33 @@ export default function MathPage() {
                 result={r}
                 onPart={(label, value) => setPart(key, label, value)}
                 onText={(text) => setText(key, text)}
-                onRetry={() => retry(key)}
+                onCorrect={() => void correct(key)}
+                correcting={correctingKey === key}
+                voiceBusy={Boolean(voiceKey)}
+                voiceDisabled={Boolean(voiceKey && voiceKey !== key)}
+                onVoiceBusy={(busy) => setVoiceKey((previous) => busy ? key : previous === key ? null : previous)}
               />
             )
           })}
         </section>
       ))}
+      </fieldset>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="sticky bottom-0 -mx-4 border-t border-[var(--color-line)] bg-white/90 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
           <p className="text-[13px] text-[var(--color-ink-soft)]">
-            {result ? '改完可以再提交一次' : '填好了就点提交，系统会一道一道批改'}
+            {result ? '请完成剩余订正' : `已填 ${answeredCount} / ${totalQuestions} 题`}
           </p>
-          <button
+          {!result && <button
             type="button"
             onClick={submit}
-            disabled={submitting}
-            className="rounded-xl bg-[var(--color-math)] px-5 py-2.5 text-[15px] font-medium text-white disabled:opacity-50"
+            disabled={submitting || Boolean(voiceKey)}
+            className="shrink-0 whitespace-nowrap rounded-xl bg-[var(--color-math)] px-5 py-2.5 text-[15px] font-medium text-white disabled:opacity-50"
           >
             {submitting ? '批改中…' : result ? '再提交一次' : '提交批改'}
-          </button>
+          </button>}
         </div>
       </div>
     </div>
@@ -209,15 +220,23 @@ export default function MathPage() {
 interface QProps {
   q: MathQuestion
   answer?: AnswerState
-  result?: { status: string; message: string; parts: { label: string; correct: boolean }[] }
+  result?: GradeResult
   onPart: (label: string, value: unknown) => void
   onText: (text: string) => void
-  onRetry: () => void
+  onCorrect: () => void
+  correcting: boolean
+  voiceBusy: boolean
+  voiceDisabled: boolean
+  onVoiceBusy: (busy: boolean) => void
 }
 
-function QuestionCard({ q, answer, result, onPart, onText, onRetry }: QProps) {
+function QuestionCard({ q, answer, result, onPart, onText, onCorrect, correcting, voiceBusy, voiceDisabled, onVoiceBusy }: QProps) {
   const valueOf = (label: string) => answer?.parts.find((p) => p.label === label)?.value
   const needsText = q.answer.aiText
+  const inlineParts = q.answer.parts.filter((part) => ['number', 'choice', 'expression'].includes(part.kind))
+  const promptSegments = q.prompt.split(/_{2,}|[（(]\s*[）)]|□/)
+  const hasInlineBlanks = inlineParts.length > 0 && promptSegments.length === inlineParts.length + 1
+  const remainingParts = q.answer.parts.filter((part) => !inlineParts.includes(part) && part.kind !== 'grid')
 
   return (
     <article className="card p-4">
@@ -226,8 +245,22 @@ function QuestionCard({ q, answer, result, onPart, onText, onRetry }: QProps) {
           {q.no}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[15px] leading-relaxed">{q.prompt}</p>
-          <SpeechButton text={q.prompt} className="mt-1.5" />
+          <p className="text-[15px] leading-loose">
+            {hasInlineBlanks ? promptSegments.map((segment, index) => (
+              <Fragment key={index}>
+                {segment}
+                {inlineParts[index] && <PartInput part={inlineParts[index]} value={valueOf(inlineParts[index].label)} onChange={(value) => onPart(inlineParts[index].label, value)} disabled={result?.status === 'correct'} inline />}
+              </Fragment>
+            )) : <>
+              {q.prompt}
+              {inlineParts.map((part) => (
+                <span key={part.label} className="ml-2 inline-block max-w-full">
+                  {inlineParts.length > 1 && <span className="mr-1 text-sm">{part.label}</span>}
+                  <PartInput part={part} value={valueOf(part.label)} onChange={(value) => onPart(part.label, value)} disabled={result?.status === 'correct'} inline />
+                </span>
+              ))}
+            </>}
+          </p>
 
           {/* 数独网格 */}
           {q.figure?.type === 'sudoku' && (
@@ -241,6 +274,7 @@ function QuestionCard({ q, answer, result, onPart, onText, onRetry }: QProps) {
                 given={q.answer.parts.find((p) => p.kind === 'grid')?.given ?? []}
                 value={(valueOf(q.answer.parts[0]?.label ?? '') as string[][]) ?? emptyGrid(q.figure.rows, q.figure.cols)}
                 onChange={(grid) => onPart(q.answer.parts[0].label, grid)}
+                disabled={result?.status === 'correct'}
               />
             </div>
           )}
@@ -260,8 +294,8 @@ function QuestionCard({ q, answer, result, onPart, onText, onRetry }: QProps) {
           )}
 
           {/* 作答区 */}
-          <div className="mt-3 space-y-2">
-            {q.answer.parts.map((part) => (
+          {(remainingParts.length > 0 || needsText) && <div className="mt-3 space-y-2">
+            {remainingParts.map((part) => (
               <PartInput
                 key={part.label}
                 part={part}
@@ -271,26 +305,29 @@ function QuestionCard({ q, answer, result, onPart, onText, onRetry }: QProps) {
               />
             ))}
             {needsText && (
-              <textarea
-                className="field resize-y leading-relaxed"
+              <VoiceInput
                 rows={3}
-                placeholder="把你的想法、算的过程写下来（也可以只写一句）"
+                label={`第${q.no}题，语音输入想法`}
+                placeholder="我的想法和计算过程"
                 value={answer?.text ?? ''}
-                onChange={(e) => onText(e.target.value)}
+                onChange={onText}
+                disabled={voiceDisabled || (result?.status === 'correct' && !result.pendingAi)}
+                onBusyChange={onVoiceBusy}
               />
             )}
-          </div>
+          </div>}
 
           {result && (
             <div className="mt-3 space-y-2">
-              <FeedbackCard result={result as never} no={q.no} title={q.prompt.slice(0, 12)} />
+              <FeedbackCard result={result} no={q.no} title={q.prompt.slice(0, 12)} />
               {result.status !== 'correct' && (
                 <button
                   type="button"
-                  onClick={onRetry}
-                  className="text-[13px] text-[var(--color-math)] underline"
+                  onClick={onCorrect}
+                  disabled={correcting || voiceBusy}
+                  className="rounded-lg border-2 border-[var(--color-math)] px-4 py-2 text-sm font-semibold text-[var(--color-math)] disabled:opacity-50"
                 >
-                  改完再提交一次
+                  {correcting ? '订正批改中…' : '提交订正'}
                 </button>
               )}
             </div>
@@ -330,18 +367,20 @@ interface PartProps {
   value: unknown
   onChange: (value: unknown) => void
   disabled?: boolean
+  inline?: boolean
 }
 
-function PartInput({ part, value, onChange, disabled }: PartProps) {
+function PartInput({ part, value, onChange, disabled, inline = false }: PartProps) {
   const str = typeof value === 'string' ? value : ''
+  const inlineClass = 'mx-1 inline-block h-12 max-w-full rounded-md border-2 border-[var(--color-math)] bg-white px-2 text-center align-middle outline-none focus:ring-2 focus:ring-[var(--color-math-soft)] disabled:bg-[var(--color-math-soft)]'
 
   switch (part.kind) {
     case 'number':
       return (
-        <label className="flex items-center gap-2 text-sm">
-          <span className="shrink-0 text-[var(--color-ink-soft)]">{part.label}</span>
+        <label className={inline ? 'inline-flex max-w-full align-middle' : 'flex items-center gap-2 text-sm'}>
+          <span className={inline ? 'sr-only' : 'shrink-0 text-[var(--color-ink-soft)]'}>{part.label}</span>
           <input
-            className="field w-28 text-center"
+            className={inline ? `${inlineClass} w-24` : 'field w-28 text-center'}
             inputMode="numeric"
             disabled={disabled}
             value={str}
@@ -352,10 +391,10 @@ function PartInput({ part, value, onChange, disabled }: PartProps) {
 
     case 'choice':
       return (
-        <label className="flex items-center gap-2 text-sm">
-          <span className="shrink-0 text-[var(--color-ink-soft)]">{part.label}</span>
+        <label className={inline ? 'inline-flex max-w-full align-middle' : 'flex items-center gap-2 text-sm'}>
+          <span className={inline ? 'sr-only' : 'shrink-0 text-[var(--color-ink-soft)]'}>{part.label}</span>
           <select
-            className="field w-40"
+            className={inline ? `${inlineClass} w-36` : 'field w-40'}
             disabled={disabled}
             value={str}
             onChange={(e) => onChange(e.target.value)}
@@ -403,11 +442,11 @@ function PartInput({ part, value, onChange, disabled }: PartProps) {
 
     case 'expression':
       return (
-        <label className="flex items-center gap-2 text-sm">
-          <span className="shrink-0 text-[var(--color-ink-soft)]">{part.label}</span>
+        <label className={inline ? 'inline-flex max-w-full align-middle' : 'flex items-center gap-2 text-sm'}>
+          <span className={inline ? 'sr-only' : 'shrink-0 text-[var(--color-ink-soft)]'}>{part.label}</span>
           <input
-            className="field flex-1 font-mono"
-            placeholder="例如：(5 + 3 + 4) × 2"
+            className={inline ? `${inlineClass} w-48 font-mono` : 'field flex-1 font-mono'}
+            placeholder="写出你的算式"
             disabled={disabled}
             value={str}
             onChange={(e) => onChange(e.target.value)}

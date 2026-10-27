@@ -95,11 +95,23 @@ const ratDiv = (a, b) => rat(a.n * b.d, a.d * b.n)
 export function parseExpression(input) {
   const cleaned = normalize(input).replace(/\s+/g, '')
   if (!cleaned) throw new Error('算式为空')
+  if (cleaned.length > 200) throw new Error('算式太长了')
   const bad = cleaned.match(/[^0-9+\-*/().]/)
   if (bad) throw new Error(`算式里有不认识的符号「${bad[0]}」`)
   const s = cleaned
   let i = 0
   const numbers = []
+  const steps = []
+  let depth = 0
+  const display = (value) => value.d === 1n ? String(value.n) : `${value.n}/${value.d}`
+  const calculate = (left, right, operator) => {
+    const operation = { '+': ratAdd, '-': ratSub, '*': ratMul, '/': ratDiv }[operator]
+    const value = operation(left, right)
+    const symbol = { '+': '+', '-': '−', '*': '×', '/': '÷' }[operator]
+    const name = { '+': '加法', '-': '减法', '*': '乘法', '/': '除法' }[operator]
+    steps.push(`第${steps.length + 1}步：${depth ? '先算括号里的' : '按先乘除、后加减，同级从左到右计算'}${depth ? name : `，这一步算${name}`}：${display(left)} ${symbol} ${display(right)} = ${display(value)}。`)
+    return value
+  }
 
   const peek = () => s[i]
   const eat = (ch) => {
@@ -113,8 +125,8 @@ export function parseExpression(input) {
   function parseExpr() {
     let left = parseTerm()
     for (;;) {
-      if (eat('+')) left = ratAdd(left, parseTerm())
-      else if (eat('-')) left = ratSub(left, parseTerm())
+      if (eat('+')) left = calculate(left, parseTerm(), '+')
+      else if (eat('-')) left = calculate(left, parseTerm(), '-')
       else return left
     }
   }
@@ -122,8 +134,8 @@ export function parseExpression(input) {
   function parseTerm() {
     let left = parseFactor()
     for (;;) {
-      if (eat('*')) left = ratMul(left, parseFactor())
-      else if (eat('/')) left = ratDiv(left, parseFactor())
+      if (eat('*')) left = calculate(left, parseFactor(), '*')
+      else if (eat('/')) left = calculate(left, parseFactor(), '/')
       else return left
     }
   }
@@ -131,8 +143,10 @@ export function parseExpression(input) {
   function parseFactor() {
     if (eat('-')) return ratSub(rat(0n), parseFactor())
     if (eat('(')) {
+      depth++
       const v = parseExpr()
       if (!eat(')')) throw new Error('括号不匹配')
+      depth--
       return v
     }
     const m = /^\d+(?:\.\d+)?/.exec(s.slice(i))
@@ -140,12 +154,13 @@ export function parseExpression(input) {
     i += m[0].length
     const num = Number(m[0])
     numbers.push(num)
-    return rat(BigInt(Math.round(num * 1000)), 1000n)
+    const [whole, fraction = ''] = m[0].split('.')
+    return rat(BigInt(whole + fraction), 10n ** BigInt(fraction.length))
   }
 
   const value = parseExpr()
   if (i < s.length) throw new Error('算式末尾有多余内容')
-  return { value, numbers }
+  return { value, numbers, steps }
 }
 
 /** 校验一个 24 点算式：结果等于目标值，且用到的数字恰好是给定数字 */
@@ -191,9 +206,13 @@ export function formatRat(r) {
  * @param {string[][]} given 题目给定的格子（用于判断是否动了给定值）
  */
 export function checkSudoku(grid, values, boxRows, boxCols, given) {
+  if (!Array.isArray(grid) || grid.length !== values || grid.some((row) => !Array.isArray(row) || row.length !== values || row.some((cell) => !['string', 'number'].includes(typeof cell)))) {
+    return { ok: false, errors: [{ msg: `请填完 ${values} 行 ${values} 列的数独` }] }
+  }
+  grid = grid.map((row) => row.map((cell) => String(cell)))
   const rows = grid.length
   const cols = grid[0]?.length || 0
-  const allowed = Array.from({ length: values + 1 }, (_, i) => String(i + 1))
+  const allowed = Array.from({ length: values }, (_, i) => String(i + 1))
   const errors = []
 
   for (let r = 0; r < rows; r++) {
@@ -285,6 +304,7 @@ export function parsePurchaseLine(line, items) {
 
 export function checkPurchaseLines(lines, spec) {
   const errors = []
+  if (lines.length !== spec.rows) errors.push(`需要写出 ${spec.rows} 种不同的买法`)
   const parsed = []
   lines.forEach((line, idx) => {
     const p = parsePurchaseLine(line, spec.items)
@@ -293,6 +313,7 @@ export function checkPurchaseLines(lines, spec) {
       return
     }
     parsed.push(p)
+    if (p.items.some((item) => item.qty <= 0)) errors.push(`第 ${idx + 1} 种买法的数量需要大于 0`)
     if (p.total > spec.budget) {
       errors.push(`第 ${idx + 1} 种买法一共 ${p.total} 元，超过 ${spec.budget} 元了`)
     }
@@ -322,8 +343,12 @@ export function gradeQuestion(question, answer) {
   let needAi = Boolean(spec.aiText)
 
   for (const part of spec.parts || []) {
-    const submitted = given.find((p) => p.label === part.label) || {}
+    const submitted = given.find((p) => p && p.label === part.label) || {}
     const res = gradePart(part, submitted)
+    if (part.kind === 'expression' && results.some((result) => normalize(result.actual).replace(/\s/g, '') === normalize(res.actual).replace(/\s/g, ''))) {
+      res.correct = false
+      res.message = '请写出两种不同的算式，不能重复。'
+    }
     results.push(res)
     if (!res.correct) allCorrect = false
   }
@@ -353,7 +378,8 @@ function gradePart(part, submitted) {
 
   switch (part.kind) {
     case 'number': {
-      const num = extractNumber(actual)
+      const normalized = normalize(actual)
+      const num = /^-?\d+(?:\.\d+)?$/.test(normalized) ? Number(normalized) : null
       if (num === null) {
         return { label, correct: false, expected: part.value, actual: actual || '', message: `${label}还没有填` }
       }
@@ -428,14 +454,14 @@ function gradePart(part, submitted) {
         label,
         correct: check.ok,
         expected: '每行、每列、每个小方框里的数字都不能重复',
-        actual: grid.map((r) => r.join('')).join(' / '),
+        actual: grid.map((row) => Array.isArray(row) ? row.join('') : String(row)).join(' / '),
         message: check.ok ? '' : `数独还没填对：${check.errors.map((e) => e.msg).join('；')}`,
         errors: check.errors,
       }
     }
 
     default:
-      return { label, correct: true, expected: null, actual, message: '' }
+      return { label, correct: false, expected: null, actual, message: '题目格式暂不支持，请让家长检查内容。' }
   }
 }
 

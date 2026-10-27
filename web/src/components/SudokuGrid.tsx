@@ -10,6 +10,7 @@ interface Props {
   given: string[][]
   value: string[][]
   onChange: (grid: string[][]) => void
+  disabled?: boolean
   /** 批改后标出出错的格子 */
   errors?: { r: number; c: number }[]
 }
@@ -27,12 +28,15 @@ export default function SudokuGrid({
   given,
   value,
   onChange,
+  disabled = false,
   errors = [],
 }: Props) {
   const errorSet = new Set(errors.map((e) => `${e.r},${e.c}`))
 
   const setCell = (r: number, c: number, v: string) => {
-    const next = value.map((row) => [...row])
+    const next = Array.from({ length: rows }, (_, row) =>
+      Array.from({ length: cols }, (_, col) => given[row]?.[col] || value[row]?.[col] || '')
+    )
     next[r][c] = v
     onChange(next)
   }
@@ -42,14 +46,14 @@ export default function SudokuGrid({
   return (
     <div className="inline-block rounded-lg border-2 border-[var(--color-ink)] bg-white">
       <div
-        style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, ${cellSize}px)` }}
+        style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, ${cellSize}px)`, gridAutoRows: `${cellSize}px` }}
         role="grid"
         aria-label="数独填格"
       >
         {Array.from({ length: rows }, (_, r) =>
           Array.from({ length: cols }, (_, c) => {
             const fixed = (given[r]?.[c] || '').trim()
-            const v = value[r]?.[c] ?? ''
+            const v = fixed || value[r]?.[c] || ''
             const isError = errorSet.has(`${r},${c}`)
             const borderRight = (c + 1) % boxCols === 0 && c !== cols - 1
             const borderBottom = (r + 1) % boxRows === 0 && r !== rows - 1
@@ -57,16 +61,19 @@ export default function SudokuGrid({
               <div
                 key={`${r}-${c}`}
                 role="gridcell"
+                style={{
+                  borderRight: c === cols - 1 ? undefined : `${borderRight ? 2 : 1}px solid var(--color-ink)`,
+                  borderBottom: r === rows - 1 ? undefined : `${borderBottom ? 2 : 1}px solid var(--color-ink)`,
+                }}
                 className={cn(
                   'relative flex items-center justify-center',
-                  borderRight && 'border-r-2 border-[var(--color-ink)]',
-                  borderBottom && 'border-b-2 border-[var(--color-ink)]',
+                  fixed && 'bg-[var(--color-math-soft)]',
                   isError && 'bg-red-50'
                 )}
               >
                 <input
                   value={v}
-                  disabled={Boolean(fixed)}
+                  disabled={disabled || Boolean(fixed)}
                   inputMode="numeric"
                   maxLength={1}
                   aria-label={`第${r + 1}行第${c + 1}格`}

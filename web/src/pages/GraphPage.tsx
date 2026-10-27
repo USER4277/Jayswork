@@ -31,17 +31,22 @@ interface PracticeResult {
 }
 
 export default function GraphPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedSubject = searchParams.get('subject') || 'math'
+  const subject = ['math', 'chinese', 'english'].includes(requestedSubject) ? requestedSubject : 'math'
+  const selectedId = searchParams.get('topic')
+  const setSelectedId = useCallback((id: string) => setSearchParams({ subject, topic: id }, { replace: true }), [subject, setSearchParams])
   const containerRef = useRef<HTMLDivElement | null>(null)
   const cyRef = useRef<any>(null)
+  const topicRequestRef = useRef(0)
 
-  const [grade, setGrade] = useState(2)
+  const [grade, setGrade] = useState(subject === 'english' ? 3 : 2)
   const [topics, setTopics] = useState<Topic[]>([])
   const [edges, setEdges] = useState<GraphEdge[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [graphError, setGraphError] = useState('')
 
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<TopicDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState('')
@@ -53,37 +58,31 @@ export default function GraphPage() {
   const [checking, setChecking] = useState<string | null>(null)
   const [cyReady, setCyReady] = useState(0)
 
-  /* 从错题本跳过来时带着 ?topic=xxx */
-  const [searchParams, setSearchParams] = useSearchParams()
-  const topicParam = searchParams.get('topic')
-
   useEffect(() => {
-    if (topicParam) setSelectedId(topicParam)
-  }, [topicParam])
-
-  /* 选中的知识点写回地址，刷新页面还在这里 */
-  useEffect(() => {
-    if (!selectedId) return
-    if (searchParams.get('topic') === selectedId) return
-    setSearchParams({ topic: selectedId }, { replace: true })
-  }, [selectedId, searchParams, setSearchParams])
+    setShowAnswer(false)
+    setPracticeAns({})
+    setPracticeRes({})
+  }, [selectedId, subject])
 
   /* ---------- 数据 ---------- */
   const loadTopics = useCallback((g: number) => {
+    const request = ++topicRequestRef.current
     setLoading(true)
     setError('')
     api
-      .topics('math', g)
+      .topics(subject, g)
       .then((r) => {
+        if (request !== topicRequestRef.current) return
         setTopics(r.topics)
         setEdges(r.dependencies)
         setLoading(false)
       })
       .catch((e: unknown) => {
+        if (request !== topicRequestRef.current) return
         setError(e instanceof Error ? e.message : '知识点图谱没能打开，再试一次吧')
         setLoading(false)
       })
-  }, [])
+  }, [subject])
 
   useEffect(() => {
     loadTopics(grade)
@@ -126,7 +125,8 @@ export default function GraphPage() {
             'text-halign': 'center',
             'text-wrap': 'wrap',
             'text-max-width': 120,
-            width: 'label',
+            width: 120,
+            height: 40,
             padding: 9,
             'min-zoomed-font-size': 9,
           },
@@ -158,7 +158,6 @@ export default function GraphPage() {
       layout: { name: 'dagre', rankDir: 'TB', nodeSep: 24, rankSep: 60 },
       minZoom: 0.15,
       maxZoom: 2.5,
-      wheelSensitivity: 0.2,
     })
 
     instance.on('tap', 'node', (evt: any) => {
@@ -175,7 +174,7 @@ export default function GraphPage() {
       instance.destroy()
       cyRef.current = null
     }
-  }, [topics, edges])
+  }, [topics, edges, setSelectedId])
 
   /* 把选中的知识点挪到画面中间 */
   useEffect(() => {
@@ -184,6 +183,9 @@ export default function GraphPage() {
     if (!cy) return
     const node = cy.getElementById(selectedId)
     if (!node || node.length === 0) return
+    cy.nodes().unselect()
+    node.select()
+    cy.zoom(Math.max(cy.zoom(), 0.85))
     cy.center(node)
   }, [selectedId, cyReady])
 
@@ -197,10 +199,11 @@ export default function GraphPage() {
     setDetailLoading(true)
     setDetailError('')
     api
-      .topic(selectedId)
+      .topic(selectedId, subject)
       .then((d) => {
         if (cancelled) return
         setDetail(d)
+        setGrade((current) => Math.max(current, d.topic.grade))
         setDetailLoading(false)
       })
       .catch((e: unknown) => {
@@ -211,7 +214,7 @@ export default function GraphPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedId, detailNonce])
+  }, [selectedId, detailNonce, subject])
 
   /** 点「先修知识点 / 能学到的知识点」时，把图谱挪到那一个点 */
   const focusTopic = useCallback((id: string) => {
@@ -224,7 +227,7 @@ export default function GraphPage() {
     const node = cy.getElementById(id)
     if (!node || node.length === 0) return
     cy.zoom(Math.max(cy.zoom(), 0.9))
-  }, [])
+  }, [setSelectedId])
 
   const zoomBy = useCallback((factor: number) => {
     const cy = cyRef.current
@@ -241,7 +244,7 @@ export default function GraphPage() {
     if (!answer) return
     setChecking(questionId)
     try {
-      const r = await api.practice(questionId, answer)
+      const r = await api.practice(questionId, answer, subject)
       setPracticeRes((prev) => ({ ...prev, [questionId]: r }))
     } catch (e: unknown) {
       setPracticeRes((prev) => ({
@@ -255,7 +258,7 @@ export default function GraphPage() {
     } finally {
       setChecking(null)
     }
-  }, [practiceAns])
+  }, [practiceAns, subject])
 
   const selectedTopic = useMemo(
     () => topics.find((t) => t.id === selectedId) ?? null,
@@ -269,15 +272,17 @@ export default function GraphPage() {
         <div>
           <h1 className="text-[20px] font-semibold tracking-tight">知识点图谱</h1>
           <p className="mt-1 text-[13px] text-[var(--color-ink-soft)]">
-            数学知识点像一张地图：先学会上面的，下面才会出现。点一个方框看看它的故事。
+            {subject === 'math' ? '数学' : subject === 'chinese' ? '语文' : '英语'} · 先修知识、掌握标准与分层练习
           </p>
         </div>
       </header>
 
       {/* 年级筛选：统一放在图表上方，作用范围覆盖整页 */}
       <div className="flex flex-wrap items-center gap-1.5">
+        <select aria-label="图谱科目" className="field mr-2" style={{ width: '7rem' }} value={subject} onChange={(event) => { setGrade(event.target.value === 'english' ? 3 : 2); setSearchParams({ subject: event.target.value }); }}><option value="math">数学</option><option value="chinese">语文</option><option value="english">英语</option></select>
+        <select aria-label="选择知识点" className="field" style={{ width: 'min(100%, 18rem)' }} value={selectedId && topics.some((topic) => topic.id === selectedId) ? selectedId : ''} onChange={(event) => { if (event.target.value) setSelectedId(event.target.value) }}><option value="">选择知识点</option>{topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.grade} 年级 · {topic.name}</option>)}</select>
         <span className="text-[13px] text-[var(--color-ink-soft)]">看几年级的：</span>
-        {GRADES.map((g) => (
+        {GRADES.filter((value) => subject !== 'english' || value >= 3).map((g) => (
           <button
             key={g}
             onClick={() => setGrade(g)}
@@ -310,7 +315,7 @@ export default function GraphPage() {
         <section className="card overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-line)] px-3 py-2">
             <span className="text-[13px] font-medium">
-              {grade} 年级 · {topics.length} 个知识点
+              {subject === 'english' ? `3–${grade}` : `1–${grade}`} 年级 · {topics.length} 个知识点
             </span>
             <div className="ml-auto flex items-center gap-1">
               <button

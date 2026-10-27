@@ -1,12 +1,14 @@
 import type { GradeResult } from '../types'
 import SpeechButton from './SpeechButton'
 import { cn } from '../lib/format'
+import WorkedSolution from './WorkedSolution'
 
 interface Props {
   result: GradeResult
   /** 显示题目序号和标题 */
   no?: number
   title?: string
+  openEnded?: boolean
 }
 
 const STATUS_STYLE = {
@@ -17,15 +19,15 @@ const STATUS_STYLE = {
 } as const
 
 /** 一道题的批改结果 */
-export default function FeedbackCard({ result, no, title }: Props) {
+export default function FeedbackCard({ result, no, title, openEnded = false }: Props) {
   const style = STATUS_STYLE[result.status]
-  const speakText = [result.message, result.errorReason, result.hint].filter(Boolean).join('。')
+  const speakText = [result.message, result.errorReason, result.hint, result.referenceAnswer, result.explanation, ...(result.workedSolution?.steps || [])].filter(Boolean).join('。')
 
   return (
     <div className={cn('rounded-xl border p-3', style.box)}>
       <div className="flex items-start gap-2">
         <span className={cn('mt-0.5 shrink-0 text-sm font-semibold', style.text)}>
-          {style.label}
+          {openEnded ? '阅读建议' : style.label}
         </span>
         <div className="min-w-0 flex-1">
           {no !== undefined && (
@@ -61,6 +63,8 @@ export default function FeedbackCard({ result, no, title }: Props) {
               ))}
             </ul>
           )}
+          {result.referenceAnswer && <div className="mt-3 space-y-2 border-t border-[var(--color-line)] pt-3"><h4 className="text-[13px] font-semibold">{openEnded ? '参考思路' : '参考解答'}</h4><p className="whitespace-pre-line text-sm leading-relaxed">{result.referenceAnswer}</p>{result.explanation && <><h4 className="text-[13px] font-semibold">讲解</h4><p className="whitespace-pre-line text-sm leading-relaxed">{result.explanation}</p></>}</div>}
+          {result.workedSolution && <WorkedSolution solution={result.workedSolution} />}
           {speakText && <SpeechButton text={speakText} className="mt-2" label="听讲解" />}
         </div>
       </div>

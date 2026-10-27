@@ -12,17 +12,20 @@
 """
 
 import json
+import os
 import sys
+from http.cookiejar import CookieJar
 import urllib.error
 import urllib.request
 
-BASE = "http://localhost:4000"
+BASE = os.environ.get("BASE_URL", "http://localhost:4000")
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
 passed = 0
 failed = 0
 
 
 def get(path):
-    with urllib.request.urlopen(BASE + path) as r:
+    with opener.open(BASE + path) as r:
         return json.loads(r.read())
 
 
@@ -33,7 +36,7 @@ def post(path, body):
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req) as r:
+        with opener.open(req) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         return {"__http_error": e.code, "body": e.read().decode()[:300]}
@@ -79,8 +82,9 @@ def main():
     d1 = get("/api/homework/date/2026-10-26")
     check("数学 5 个题型", len(d1["math"]["groups"]) == 5)
     check("数学 10 题", sum(len(g["questions"]) for g in d1["math"]["groups"]) == 10)
-    check("语文 3 问", len(d1["chinese"]["questions"]) == 3)
-    check("语文有参考答案", all(q["reference"] for q in d1["chinese"]["questions"]))
+    check("未解锁时不返回语文内容", d1["chineseUnlocked"] or d1["chinese"] is None)
+    check("语文 3 问", len(d15["chinese"]["questions"]) == 3)
+    check("语文有参考思路和讲解", all(q["reference"] and q["explanation"] for q in d15["chinese"]["questions"]))
     check("编程有提示词", len(d1["coding"]["prompts"]) >= 1)
     check("编程有步骤", len(d1["coding"]["steps"]) >= 3)
 
@@ -94,25 +98,13 @@ def main():
         "remainder-6": {"parts": [{"label": "商", "value": "6"}, {"label": "余", "value": "5"}]},
         "word-7": {"parts": [{"label": "答案", "value": "25"}], "text": "32 + 18 - 25 = 25"},
         "word-8": {"parts": [{"label": "答案", "value": "48"}], "text": "12 x 4 = 48"},
-        "extend-9": {
-            "parts": [
-                {
-                    "label": "数独",
-                    "value": [
-                        ["4", "3", "2", "1"],
-                        ["2", "1", "3", "4"],
-                        ["1", "2", "4", "3"],
-                        ["3", "4", "1", "2"],
-                    ],
-                }
-            ]
-        },
-        "extend-10": {"parts": [], "text": "每次都猜中间的数"},
+        "extend-9": part("下一个数", "10"),
+        "extend-10": part("下一个图形", "圆"),
     }
     r = post("/api/homework/submit", {"date": "2026-10-26", "subject": "math", "answers": answers})
     by_key = {x["key"]: x for x in r.get("results", [])}
     # 这几题是纯规则判分，结果必须是确定的；应用题和开放题走 AI，不做硬性断言
-    for key in ["arith-1", "arith-2", "addsub-3", "addsub-4", "remainder-5", "remainder-6", "extend-9"]:
+    for key in ["arith-1", "arith-2", "addsub-3", "addsub-4", "remainder-5", "remainder-6", "extend-9", "extend-10"]:
         check("%s 判为对" % key, by_key.get(key, {}).get("status") == "correct", by_key.get(key))
     check("总分在 70 以上", r.get("score", 0) >= 70, r.get("score"))
     check("每题都有反馈", len(r.get("results", [])) == 10, len(r.get("results", [])))
@@ -126,6 +118,10 @@ def main():
     arith1 = [x for x in r2["results"] if x["key"] == "arith-1"][0]
     check("判为错", arith1["status"] == "wrong", arith1)
     check("给出正确答案", "4" in arith1.get("message", ""), arith1.get("message"))
+    locked = post("/api/homework/submit", {"date": "2026-10-26", "subject": "chinese", "answers": {}})
+    check("数学有错时不能提交语文", locked.get("__http_error") == 403, locked)
+    corrected = post("/api/homework/correct", {"date": "2026-10-26", "subject": "math", "questionKey": "arith-1", "answers": {"arith-1": part("答案", "4")}})
+    check("订正只提交一题但返回完整成绩", corrected.get("total") == 10 and any(q["key"] == "arith-1" and q["status"] == "correct" for q in corrected.get("results", [])))
 
     print("\n== 错题本按科目 + 周期 ==")
     wb = get("/api/review/wrong?subject=all")
@@ -138,20 +134,18 @@ def main():
         check("错题带知识点", cycles and cycles[0]["items"][0]["knowledgePoint"], cycles and cycles[0]["items"][0])
 
     print("\n== 数独做错要指出位置 ==")
-    bad_grid = [["4", "3", "2", "1"], ["2", "1", "3", "4"], ["1", "1", "4", "3"], ["3", "4", "1", "2"]]
-    bad2 = dict(answers)
-    bad2["extend-9"] = {"parts": [{"label": "数独", "value": bad_grid}]}
-    r3 = post("/api/homework/submit", {"date": "2026-10-26", "subject": "math", "answers": bad2})
+    bad_grid = [["1", "2", "3", "3"], ["3", "4", "1", "2"], ["2", "1", "4", "3"], ["4", "3", "2", "1"]]
+    bad2 = {"extend-9": {"parts": [{"label": "数独", "value": bad_grid}]}}
+    r3 = post("/api/homework/submit", {"date": "2026-10-27", "subject": "math", "answers": bad2})
     sud = [x for x in r3["results"] if x["key"] == "extend-9"][0]
     check("数独判为错", sud["status"] == "wrong", sud)
     check("指出重复位置", "重复" in sud.get("message", ""), sud.get("message"))
 
-    print("\n== 24 点验算 ==")
+    print("\n== 简化拓展题 ==")
     d2 = get("/api/homework/date/2026-10-27")
     ext10 = [g for g in d2["math"]["groups"] if g["key"] == "extend"][0]["questions"][1]
-    check("24 点题有两个算式位", len(ext10["answer"]["parts"]) == 2, ext10["answer"]["parts"])
-    nums = ext10["answer"]["parts"][0].get("numbers")
-    check("给出了 4 个数字", bool(nums) and len(nums) == 4, nums)
+    check("替换为凑十练习", ext10["answer"]["parts"][0]["value"] == 7, ext10)
+    check("简化拓展题无需 AI", not any(q["answer"]["aiText"] for group in d2["math"]["groups"] if group["key"] == "extend" for q in group["questions"]))
 
     print("\n== 英语选择题 ==")
     d3 = get("/api/homework/date/2026-10-27")

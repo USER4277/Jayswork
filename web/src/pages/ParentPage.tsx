@@ -23,8 +23,8 @@ export default function ParentPage() {
       const r = await api.parentLogin(pin)
       if (r.ok) setUnlocked(true)
       else setError('PIN 不对，再试一次')
-    } catch {
-      setError('连不上服务')
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '连不上服务')
     }
   }
 
@@ -55,7 +55,7 @@ export default function ParentPage() {
     )
   }
 
-  return <ParentContent onLock={() => setUnlocked(false)} />
+  return <ParentContent onLock={() => { void api.parentLogout().then(() => setUnlocked(false)).catch(() => setUnlocked(false)) }} />
 }
 
 function ParentContent({ onLock }: { onLock: () => void }) {
@@ -69,15 +69,16 @@ function ParentContent({ onLock }: { onLock: () => void }) {
   >([])
   const [settings, setSettings] = useState<Record<string, unknown>>({})
   const [day, setDay] = useState(1)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    api.parentAnswers().then(setAnswers).catch(() => {})
+    api.parentAnswers().then(setAnswers).catch((failure: Error) => setError(failure.message))
     fetch('/api/parent/overview')
-      .then((r) => r.json())
+      .then((response) => { if (!response.ok) throw new Error('请重新登录家长区'); return response.json() })
       .then(setOverview)
-      .catch(() => {})
-    api.recordings().then((r) => setRecordings(r.items)).catch(() => {})
-    api.parentSettings().then(setSettings).catch(() => {})
+      .catch((failure: Error) => setError(failure.message))
+    api.recordings().then((r) => setRecordings(r.items)).catch((failure: Error) => setError(failure.message))
+    api.parentSettings().then(setSettings).catch((failure: Error) => setError(failure.message))
   }, [])
 
   const saveSetting = async (patch: Record<string, unknown>) => {
@@ -96,6 +97,7 @@ function ParentContent({ onLock }: { onLock: () => void }) {
           锁定
         </button>
       </header>
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
       <nav className="flex gap-1">
         {(
@@ -180,6 +182,7 @@ function ParentContent({ onLock }: { onLock: () => void }) {
         </section>
       )}
 
+      {tab === 'progress' && <WeeklySummary />}
       {tab === 'progress' && (
         <section className="card overflow-hidden">
           <table className="w-full text-[13px]">
@@ -271,6 +274,8 @@ function Settings({
     Boolean(settings.referenceUnlocked)
   )
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     setDeadline(String(settings.deadline ?? ''))
@@ -281,10 +286,15 @@ function Settings({
   const save = async () => {
     const patch: Record<string, unknown> = { deadline, monitoring, referenceUnlocked }
     if (pin) patch.pin = pin
-    await onSave(patch)
-    setPin('')
-    setSaved(true)
-    window.setTimeout(() => setSaved(false), 2000)
+    setError('')
+    setSaving(true)
+    try {
+      await onSave(patch)
+      setPin('')
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 2000)
+    } catch (failure) { setError(failure instanceof Error ? failure.message : '保存失败，请重试') }
+    finally { setSaving(false) }
   }
 
   return (
@@ -307,7 +317,7 @@ function Settings({
             onChange={(e) => setMonitoring(e.target.checked)}
             className="h-4 w-4 accent-[var(--color-math)]"
           />
-          <span>开启学习监控（开始作业时打开摄像头并同步到手机）</span>
+          <span>开启本机录像（开始作业时打开摄像头，录像保存在这台电脑）</span>
         </label>
 
         <label className="flex items-center gap-2 text-[13px]">
@@ -336,26 +346,45 @@ function Settings({
           <button
             type="button"
             onClick={save}
+            disabled={saving}
             className="rounded-xl bg-[var(--color-math)] px-4 py-2 text-[14px] font-medium text-white"
           >
             保存设置
           </button>
           {saved && <span className="text-[13px] text-emerald-600">已保存 ✓</span>}
+          {error && <span role="alert" className="text-[13px] text-red-600">{error}</span>}
         </div>
       </div>
 
       <div className="card p-4 text-[13px] leading-relaxed text-[var(--color-ink-soft)]">
-        <p className="mb-1 font-medium text-[var(--color-ink)]">关于爸爸手机看画面</p>
-        <p>
-          观看页是 <code>/watch</code>。要让它能在手机上打开，需要在 .env 里把{' '}
-          <code>HOST</code> 改成 <code>0.0.0.0</code> 再重启服务，然后手机访问{' '}
-          <code>http://电脑的局域网IP:4000/watch</code>，输入家长 PIN 进入。
-        </p>
-        <p className="mt-1.5">
-          画面只在家里这台设备和手机之间直接传递，不经过任何外部服务。用完建议把 HOST 改回{' '}
-          <code>127.0.0.1</code>。
-        </p>
+        <p className="mb-1 font-medium text-[var(--color-ink)]">本机录像</p>
+        <p>摄像头只用于本机预览和录像，不连接远程观看端。结束前请点击摄像头画面上的结束按钮，等待录像保存后再关闭页面。</p>
       </div>
     </section>
   )
+}
+
+function WeeklySummary() {
+  const [cycle, setCycle] = useState(1)
+  const [summary, setSummary] = useState<Record<string, unknown> | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    setSummary(null)
+    fetch(`/api/review/summary/${cycle}`).then((response) => response.json()).then((value) => { if (!cancelled) setSummary(value.summary) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [cycle])
+  const generate = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const response = await fetch('/api/ai/weekly-summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cycle }) })
+      const value = await response.json()
+      if (!response.ok) throw new Error(value.error || '小结生成失败')
+      setSummary(value)
+    } catch (failure) { setError(failure instanceof Error ? failure.message : '生成失败') }
+    finally { setBusy(false) }
+  }
+  return <section className="space-y-3 border-y border-[var(--color-line)] py-4"><div className="flex flex-wrap items-center gap-3"><h2 className="text-sm font-semibold">每周学习小结</h2><select aria-label="小结周期" className="field w-28" value={cycle} onChange={(event) => setCycle(Number(event.target.value))}>{[1, 2, 3, 4].map((value) => <option key={value} value={value}>第 {value} 周</option>)}</select><button type="button" onClick={generate} disabled={busy} className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm">{busy ? '生成中…' : '生成 AI 小结'}</button></div>{error && <p role="alert" className="text-sm text-amber-700">{error}</p>}{summary && <dl className="space-y-2 text-sm">{Object.entries(summary).map(([key, value]) => <div key={key}><dt className="font-medium">{key}</dt><dd className="mt-1 whitespace-pre-wrap leading-relaxed">{typeof value === 'string' ? value : Array.isArray(value) ? value.map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join('\n') : JSON.stringify(value)}</dd></div>)}</dl>}</section>
 }
