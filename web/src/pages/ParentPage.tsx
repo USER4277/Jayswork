@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { cn, formatDate } from '../lib/format'
+import ParentRazPanel from '../components/ParentRazPanel'
 
 interface AnswerDay {
   day: number
@@ -59,7 +60,7 @@ export default function ParentPage() {
 }
 
 function ParentContent({ onLock }: { onLock: () => void }) {
-  const [tab, setTab] = useState<'answers' | 'progress' | 'recordings' | 'settings'>('answers')
+  const [tab, setTab] = useState<'answers' | 'progress' | 'recordings' | 'settings' | 'english-test'>('answers')
   const [answers, setAnswers] = useState<AnswerDay[]>([])
   const [overview, setOverview] = useState<
     { date: string; subject: string; status: string; score: number; total: number }[]
@@ -106,6 +107,7 @@ function ParentContent({ onLock }: { onLock: () => void }) {
             ['progress', '完成情况'],
             ['recordings', '录像'],
             ['settings', '设置'],
+            ['english-test', '英语测试'],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -123,6 +125,8 @@ function ParentContent({ onLock }: { onLock: () => void }) {
           </button>
         ))}
       </nav>
+
+      {tab === 'english-test' && <ParentRazPanel />}
 
       {tab === 'answers' && (
         <section className="space-y-3">

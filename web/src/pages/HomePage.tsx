@@ -67,7 +67,7 @@ export default function HomePage() {
     <div className="space-y-5">
       {/* 日期条 */}
       <details>
-        <summary className="cursor-pointer text-sm text-[var(--color-ink-soft)]">28 天作业安排</summary>
+        <summary className="cursor-pointer text-sm text-[var(--color-ink-soft)]">未来 28 天作业安排</summary>
         <div className="mb-2 flex items-baseline justify-between">
           <h2 className="text-sm font-medium text-[var(--color-ink-soft)]">作业安排</h2>
           <span className="text-[12px] text-[var(--color-ink-soft)]">
@@ -150,10 +150,10 @@ export default function HomePage() {
             <SubjectCard
               subject="english"
               title="英语作业"
-              desc="每天一段对话"
+              desc="RAZ 原声听读与绘本阅读"
               locked={!dayItem || dayItem.locked || !dayItem.languageIndex}
               progress={progressFor('english')}
-              extra="听对话，看英文和中文"
+              extra="测级 · 听读 · 理解 · 复习"
             />
           )}
           <SubjectCard

@@ -7,17 +7,16 @@ import { getDays, getMeta } from './content.js'
  *   day_index = (日期 - 锚点) 天数 + 1
  *   奇数 day_index → 语文，偶数 → 英语（需求：语文和英语隔天出现）
  *   day_index 1..14 → 数学 + 编程（取 docx 同一「天」，保证数学与编程配套）
- *   day_index 15..28 → 只有语言（顺延池：语文第 8~14 篇 / 英语第 8~14 段）
+ *   day_index 15..28 → 只有语言（语文第 8~14 篇 / 独立 RAZ 英语课程）
  *
- * 语言题目的取法：语文第 (day_index+1)/2 篇，英语第 day_index/2 段 —— 正好在
- * 28 天里把 docx 的 14 篇语文 + 14 段英语全部用完。
+ * 语文取第 (day_index+1)/2 篇；英语日期持续交替，书目与复习由 RAZ 学习进度决定。
  *
  * 错题本的「7 天一个周期」用的是同一个锚点：cycle = floor((day_index-1)/7)+1。
  */
 
 export const ANCHOR = getMeta().anchorStart || '2026-10-26'
 export const DOCX_DAYS = getDays().length // 14
-export const TOTAL_DAYS = DOCX_DAYS * 2 // 28：语言题循环两轮
+export const TOTAL_DAYS = DOCX_DAYS * 2 // 作业本语言内容范围，不限制 RAZ 日期
 
 const MS_DAY = 24 * 60 * 60 * 1000
 
@@ -89,7 +88,7 @@ export function scheduleFor(dateStr) {
   const languageIndex = odd ? (idx + 1) / 2 : idx / 2
 
   const hasMath = idx <= DOCX_DAYS
-  const hasLanguage = languageIndex <= DOCX_DAYS
+  const hasLanguage = !odd || languageIndex <= DOCX_DAYS
 
   return {
     date: dateStr,
@@ -140,7 +139,7 @@ export function contentFor(dateStr) {
     schedule: s,
     math: mathDay ? mathDay.math : null,
     chinese: s.languageSubject === 'chinese' ? chineseList[s.languageIndex - 1] || null : null,
-    english: english ? { ...english, dialogues: english.dialogues.slice(0, 1), sentences: [], task: '', tip: '', parentTip: '' } : null,
+    english: s.languageSubject === 'english' && s.languageIndex ? { ...(english || { theme: 'RAZ 分级阅读', scene: '', dialogues: [] }), source: 'raz', dialogues: english?.dialogues.slice(0, 1) || [], sentences: [], task: '', tip: '', parentTip: '' } : null,
     englishExercises: null,
     coding: codingDay ? codingDay.coding : null,
   }

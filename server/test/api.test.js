@@ -11,7 +11,7 @@ process.env.DATA_DIR = directory
 process.env.PREVIEW = '1'
 process.env.MINIMAX_API_KEY = ''
 const { router: homework, gradeOne, collectQuestions } = await import('../src/routes/homework.js')
-const { router: parent } = await import('../src/routes/parent.js')
+const { router: parent, getEnglishTestStorage } = await import('../src/routes/parent.js')
 const { router: review } = await import('../src/routes/review.js')
 const { router: watch } = await import('../src/routes/watch.js')
 const { router: graph } = await import('../src/routes/graph.js')
@@ -20,6 +20,7 @@ const { loadGraph, loadHomework } = await import('../src/content.js')
 const { db, backupDatabase } = await import('../src/db.js')
 const { todayStr } = await import('../src/schedule.js')
 const { config, defaultDataDir } = await import('../src/config.js')
+const { listeningQuestions, gradeListeningAnswers } = await import('../src/english-reading.js')
 let server
 let base
 
@@ -43,6 +44,7 @@ beforeEach(() => mock.timers.setTime(new Date(2026, 9, 26, 12).getTime()))
 after(async () => {
   mock.timers.reset()
   await new Promise((resolve) => server.close(resolve))
+  getEnglishTestStorage().db.close()
   db.close()
   fs.rmSync(directory, { recursive: true, force: true })
 })
@@ -50,9 +52,9 @@ after(async () => {
 async function request(endpoint, body, options = {}) {
   const response = await fetch(base + endpoint, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: { 'Content-Type': 'application/json', ...options.headers },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     ...options,
+    headers: { 'Content-Type': 'application/json', ...options.headers },
   })
   return { status: response.status, data: await response.json(), cookie: response.headers.get('set-cookie')?.split(';')[0] }
 }
@@ -380,7 +382,39 @@ test('Chinese voice answers persist audio and transcripts by date and question',
   completeMath(date)
 })
 
-test('English has one daily dialogue and requires the latest recording to score at least seven', async () => {
+test('listening meaning questions use the daily dialogue and grade Chinese choices locally', () => {
+  for (let index = 2; index <= 28; index += 2) {
+    const date = new Date(2026, 9, 25 + index, 12)
+    const selected = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    const questions = listeningQuestions(selected)
+    assert.ok(questions.length >= 3)
+    for (const question of questions) {
+      assert.equal(question.options.length, 4)
+      assert.equal(new Set(question.options).size, 4)
+      assert.ok(question.options.every(option => /[\u4e00-\u9fff]/.test(option)))
+      assert.ok(question.options.includes(question.answer))
+    }
+    const answers = Object.fromEntries(questions.map(question => [question.id, question.answer]))
+    assert.equal(gradeListeningAnswers(selected, answers).score, 10)
+    assert.equal(gradeListeningAnswers(selected, answers).passed, true)
+    const wrong = Object.fromEntries(questions.map(question => [question.id, question.options.find(option => option !== question.answer)]))
+    assert.equal(gradeListeningAnswers(selected, wrong).passed, false)
+    assert.equal(gradeListeningAnswers(selected, wrong).score, 0)
+    for (let count = 0; count <= questions.length; count += 1) {
+      const partial = Object.fromEntries(questions.map((question, index) => [question.id, index < count ? question.answer : wrong[question.id]]))
+      const expected = Math.round(count / questions.length * 100) / 10
+      assert.equal(gradeListeningAnswers(selected, partial).score, expected)
+      assert.equal(gradeListeningAnswers(selected, partial).passed, expected >= 7)
+    }
+    assert.equal(gradeListeningAnswers(selected, { ...answers, extra: '无效' }), null)
+    assert.equal(gradeListeningAnswers(selected, { ...answers, [questions[0].id]: '不在选项中' }), null)
+    delete answers[questions[0].id]
+    assert.equal(gradeListeningAnswers(selected, answers), null)
+  }
+  assert.equal(gradeListeningAnswers('2026-10-26', {}), null)
+})
+
+test('English requires passed sentence recordings and a server-graded meaning quiz, not a whole dialogue recording', async () => {
   for (let index = 2; index <= 28; index += 2) {
     const date = `2026-${index <= 6 ? '10' : '11'}-${String(index <= 6 ? 25 + index : index - 6).padStart(2, '0')}`
     mock.timers.setTime(new Date(`${date}T12:00:00`).getTime())
@@ -395,22 +429,43 @@ test('English has one daily dialogue and requires the latest recording to score 
     const voiceId = `reading-${date}`
     db.prepare("INSERT INTO voice_answers (id, date, question_key, transcript, audio_path, mime_type, created_at) VALUES (?, ?, 'english-dialogue', 'Hello', 'test.wav', 'audio/wav', ?)").run(voiceId, date, new Date().toISOString())
     const saveResult = (score) => db.prepare("INSERT OR REPLACE INTO attempts (date, subject, question_key, result_json, created_at, updated_at) VALUES (?, 'english', 'dialogue-reading', ?, ?, ?)").run(date, JSON.stringify({ voiceId, passed: score >= 8, score }), new Date().toISOString(), new Date().toISOString())
-    saveResult(6.9)
-    assert.equal((await request('/homework/english-complete', { date, completed: true })).status, 409)
-    saveResult(7)
+    saveResult(10)
     assert.equal((await request('/homework/english-complete', { date, completed: true })).status, 409)
     for (const [index] of response.data.english.dialogues[0].lines.entries()) {
       const lineId = `${voiceId}-line-${index}`
       db.prepare("INSERT INTO voice_answers (id, date, question_key, transcript, audio_path, mime_type, created_at) VALUES (?, ?, ?, 'Hello', 'test.wav', 'audio/wav', ?)").run(lineId, date, `english-line-${index}`, new Date().toISOString())
       db.prepare("INSERT INTO attempts (date, subject, question_key, result_json, created_at, updated_at) VALUES (?, 'english', ?, ?, ?, ?)").run(date, `line-reading-${index}`, JSON.stringify({ voiceId: lineId, passed: false, score: 7 }), new Date().toISOString(), new Date().toISOString())
     }
+    assert.equal((await request('/homework/english-complete', { date, completed: true })).status, 409)
+    assert.equal((await request(`/homework/english-reading/${date}`)).status, 410)
+    const quiz = await request(`/homework/english-listening/${date}`)
+    assert.equal(quiz.status, 200)
+    assert.ok(quiz.data.questions.every(question => !('answer' in question)))
+    assert.equal(quiz.data.result, null)
+    assert.equal((await request(`/homework/english-listening/${date}`, { answers: {}, score: 10, passed: true })).status, 400)
+    const questions = listeningQuestions(date)
+    const wrong = Object.fromEntries(questions.map(question => [question.id, question.options.find(option => option !== question.answer)]))
+    const failed = await request(`/homework/english-listening/${date}`, { answers: wrong, score: 10, passed: true })
+    assert.equal(failed.data.result.score, 0)
+    assert.equal(failed.data.result.passed, false)
+    assert.equal((await request('/homework/english-complete', { date, completed: true })).status, 409)
+    const answers = Object.fromEntries(questions.map(question => [question.id, question.answer]))
+    const correct = await request(`/homework/english-listening/${date}`, { answers })
+    assert.equal(correct.data.result.score, 10)
+    assert.equal(correct.data.result.passed, true)
+    assert.deepEqual((await request(`/homework/english-listening/${date}`)).data, correct.data)
     assert.equal((await request('/homework/english-complete', { date, completed: true })).status, 200)
     const restored = await request(`/homework/date/${date}`)
     const progress = restored.data.progress.find((row) => row.subject === 'english')
     assert.equal(progress.status, 'submitted')
     assert.equal(progress.total, 1)
-    assert.equal(progress.score, 7)
-    db.prepare("INSERT INTO voice_answers (id, date, question_key, transcript, audio_path, mime_type, created_at) VALUES (?, ?, 'english-dialogue', '', 'test.wav', 'audio/wav', ?)").run(`${voiceId}-new`, date, new Date().toISOString())
+    assert.equal(progress.score, 10)
+    await request(`/homework/english-listening/${date}`, { answers: wrong })
+    assert.equal(db.prepare("SELECT status FROM daily_progress WHERE date = ? AND subject = 'english'").get(date).status, 'in_progress')
+    assert.equal((await request('/homework/english-complete', { date, completed: true })).status, 409)
+    await request(`/homework/english-listening/${date}`, { answers })
+    assert.equal((await request('/homework/english-complete', { date, completed: true })).status, 200)
+    db.prepare("INSERT INTO voice_answers (id, date, question_key, transcript, audio_path, mime_type, created_at) VALUES (?, ?, 'english-line-0', '', 'test.wav', 'audio/wav', ?)").run(`${voiceId}-new`, date, new Date().toISOString())
     assert.equal((await request('/homework/english-complete', { date, completed: true })).status, 409)
   }
   assert.equal((await request('/homework/english-complete', { date: '2026-10-27', completed: true })).status, 403)
@@ -430,13 +485,12 @@ test('English recording is transcribed on the server, persists, and low scores r
   wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22)
   wav.writeUInt32LE(16000, 24); wav.writeUInt32LE(32000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
   wav.write('data', 36); wav.writeUInt32LE(64000, 40)
-  let sentenceMode = false
   globalThis.fetch = async (url, options) => {
     if (String(url).startsWith(config.ai.baseUrl)) {
       if (String(url).endsWith('/speech_to_text')) return Response.json({ text: 'Hello', duration: 2 })
       assert.match(JSON.parse(options.body).messages.at(-1).content, /Hello/)
       assert.doesNotMatch(JSON.parse(options.body).messages.at(-1).content, /CLIENT_PERFECT_TRANSCRIPT/)
-      assert.match(JSON.parse(options.body).messages[0].content, sentenceMode ? /单独一句，只评估这一句/ : /完整对话，必须核对整段/)
+      assert.match(JSON.parse(options.body).messages[0].content, /单独一句，只评估这一句/)
       return Response.json({ choices: [{ message: { content: JSON.stringify({ 得分: 3, 讲解: '只读了问好，请完整跟读对话。', 订正提示: '重新录音。' }) } }] })
     }
     return originalFetch(url, options)
@@ -445,7 +499,7 @@ test('English recording is transcribed on the server, persists, and low scores r
     const body = new FormData()
     body.append('audio', new Blob([wav], { type: 'audio/wav' }), 'reading.wav')
     body.append('transcript', 'CLIENT_PERFECT_TRANSCRIPT')
-    const response = await originalFetch(`${base}/homework/english-reading/${date}`, { method: 'POST', body })
+    const response = await originalFetch(`${base}/homework/english-reading/${date}/line/0`, { method: 'POST', body })
     const saved = await response.json()
     assert.equal(response.status, 200)
     assert.equal(saved.result.score, 3)
@@ -453,9 +507,8 @@ test('English recording is transcribed on the server, persists, and low scores r
     assert.equal(saved.recording.transcript, 'Hello')
     assert.equal((await originalFetch(`http://127.0.0.1:${server.address().port}${saved.recording.url}`)).status, 200)
     assert.equal((await request('/homework/english-complete', { date, completed: true })).status, 409)
-    assert.equal((await request(`/homework/english-reading/${date}/retry`, { voiceId: saved.recording.id })).status, 409)
+    assert.equal((await request(`/homework/english-reading/${date}/line/0/retry`, { voiceId: saved.recording.id })).status, 409)
     assert.equal((await request('/ai/english-grade', { sentence: 'Hello', answer: 'Hello' })).status, 410)
-    sentenceMode = true
     const lineBody = new FormData()
     lineBody.append('audio', new Blob([wav], { type: 'audio/wav' }), 'line.wav')
     const lineResponse = await originalFetch(`${base}/homework/english-reading/${date}/line/0`, { method: 'POST', body: lineBody })
@@ -463,12 +516,134 @@ test('English recording is transcribed on the server, persists, and low scores r
     assert.equal(lineResponse.status, 200)
     assert.equal(line.result.score, 3)
     assert.notEqual(line.recording.id, saved.recording.id)
-    assert.equal((await request(`/homework/english-reading/${date}`)).data.recording.id, saved.recording.id)
+    assert.equal((await request(`/homework/english-reading/${date}/line/0`)).data.recording.id, line.recording.id)
     assert.equal((await request(`/homework/english-reading/${date}/line/1`)).data.result.score, 7)
-    assert.equal((await originalFetch(`${base}/homework/english-reading/${date}`, { method: 'POST', body: lineBody })).status, 409)
+    assert.equal((await originalFetch(`${base}/homework/english-reading/${date}`, { method: 'POST', body: lineBody })).status, 410)
     assert.equal((await request(`/homework/english-reading/${date}/line/999`)).status, 400)
     assert.equal((await request(`/homework/english-reading/${date}/line/-1`)).status, 400)
   } finally { globalThis.fetch = originalFetch; Object.assign(config.ai, previous) }
+})
+
+test('parent English tests require authentication and leave ordinary dates locked', async () => {
+  const prefix = '/parent/english-test'
+  assert.equal((await request(`${prefix}/dates`)).status, 401)
+  assert.equal((await request(`${prefix}/date/2026-10-27`)).status, 401)
+  assert.equal((await request(`${prefix}/english-reading/2026-10-27/line/0`, {})).status, 401)
+  assert.equal((await request(`${prefix}/english-complete`, { date: '2026-10-27', completed: true })).status, 401)
+  assert.equal((await request(`${prefix}/reset`, { date: '2026-10-27' })).status, 401)
+  const login = await request('/parent/login', { pin: '0000' })
+  const options = { headers: { Cookie: login.cookie } }
+  const dates = await request(`${prefix}/dates`, undefined, options)
+  assert.equal(dates.status, 200)
+  assert.equal(dates.data.items.length, 14)
+  const selected = dates.data.items[0].date
+  const content = await request(`${prefix}/date/${selected}`, undefined, options)
+  assert.equal(content.status, 200)
+  assert.equal(content.data.testMode, true)
+  assert.equal(content.data.english.dialogues.length, 1)
+  assert.equal(content.data.math, null)
+  assert.equal(content.data.coding, null)
+  assert.equal((await request(`/homework/date/${selected}`)).status, 403)
+  assert.equal((await request(`/homework/english-reading/${selected}/line/0`)).status, 403)
+  assert.equal((await request('/homework/english-complete', { date: selected, completed: true, testMode: true }, options)).status, 403)
+  assert.equal((await request(`${prefix}/date/2026-10-26`, undefined, options)).status, 400)
+  assert.equal((await request(`${prefix}/reset`, { date: '../../recordings' }, options)).status, 400)
+  await request('/parent/logout', {}, options)
+  assert.equal((await request(`${prefix}/dates`, undefined, options)).status, 401)
+})
+
+test('parent English ASR, completion, replay and reset use a separate database and audio directory', async () => {
+  const date = '2026-10-27'
+  const prefix = '/parent/english-test'
+  const login = await request('/parent/login', { pin: '0000' })
+  const headers = { Cookie: login.cookie }
+  const tables = ['attempts', 'daily_progress', 'voice_answers', 'wrong_items', 'sessions']
+  const normalData = () => Object.fromEntries(tables.map(table => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]))
+  const before = normalData()
+  const originalFetch = globalThis.fetch
+  const previous = { ...config.ai }
+  Object.assign(config.ai, { apiKey: 'test-only', baseUrl: 'https://parent-english-test.invalid/v1' })
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith(config.ai.baseUrl)) {
+      if (String(url).endsWith('/speech_to_text')) return Response.json({ text: 'Hello', duration: 2 })
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ 得分: 7, 讲解: '内容达到要求。', 订正提示: '' }) } }] })
+    }
+    return originalFetch(url, options)
+  }
+  try {
+    const storage = getEnglishTestStorage()
+    assert.equal(storage.dataDir, path.join(directory, 'tests', 'english'))
+    const wav = Buffer.alloc(44 + 64000)
+    wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8)
+    wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22)
+    wav.writeUInt32LE(16000, 24); wav.writeUInt32LE(32000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
+    wav.write('data', 36); wav.writeUInt32LE(64000, 40)
+    const upload = async (suffix) => {
+      const body = new FormData()
+      body.append('audio', new Blob([wav], { type: 'audio/wav' }), 'test.wav')
+      const response = await originalFetch(`${base}${prefix}/english-reading/${date}${suffix}`, { method: 'POST', headers, body })
+      assert.equal(response.status, 200)
+      const data = await response.json()
+      assert.equal(data.result.score, 7)
+      assert.equal(data.result.passed, true)
+      return data
+    }
+    const line = await upload('/line/0')
+    const content = (await request(`${prefix}/date/${date}`, undefined, { headers })).data
+    for (let index = 1; index < content.english.dialogues[0].lines.length; index++) {
+      const id = `parent-test-line-${index}`
+      const stamp = new Date().toISOString()
+      storage.db.prepare('INSERT INTO voice_answers (id, date, question_key, transcript, audio_path, mime_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, date, `english-line-${index}`, 'Hello', 'test.wav', 'audio/wav', stamp)
+      storage.db.prepare("INSERT INTO attempts (date, subject, question_key, result_json, created_at, updated_at) VALUES (?, 'english', ?, ?, ?, ?)").run(date, `line-reading-${index}`, JSON.stringify({ voiceId: id, score: 7, passed: true }), stamp, stamp)
+    }
+    const answers = Object.fromEntries(listeningQuestions(date).map(question => [question.id, question.answer]))
+    const quiz = await request(`${prefix}/english-listening/${date}`, { answers }, { headers })
+    assert.equal(quiz.data.result.passed, true)
+    assert.equal((await request(`${prefix}/english-complete`, { date, completed: true }, { headers })).status, 200)
+    assert.equal(storage.db.prepare("SELECT status FROM daily_progress WHERE date = ? AND subject = 'english'").get(date).status, 'submitted')
+    const audioUrl = `http://127.0.0.1:${server.address().port}${line.recording.url}`
+    assert.ok(line.recording.url.startsWith('/api/parent/english-test/voice-file/'))
+    assert.equal((await originalFetch(audioUrl)).status, 401)
+    const playback = await originalFetch(audioUrl, { headers })
+    assert.equal(playback.status, 200)
+    assert.deepEqual(Buffer.from(await playback.arrayBuffer()), wav)
+    assert.equal((await request(`/homework/voice-file/${line.recording.id}`)).status, 404)
+    storage.active.add(date)
+    assert.equal((await request(`${prefix}/reset`, { date }, { headers })).status, 409)
+    storage.active.delete(date)
+    assert.equal((await request(`${prefix}/reset`, { date }, { headers })).status, 200)
+    for (const table of ['attempts', 'voice_answers', 'daily_progress']) assert.equal(storage.db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE date = ?`).get(date).count, 0)
+    assert.equal(fs.existsSync(path.join(storage.dataDir, 'voice', date)), false)
+    assert.deepEqual(normalData(), before)
+    await request('/parent/logout', {}, { headers })
+    assert.equal((await originalFetch(audioUrl, { headers })).status, 401)
+  } finally { globalThis.fetch = originalFetch; Object.assign(config.ai, previous) }
+})
+
+test('RAZ calendar extends beyond old homework and parent test reset leaves formal course data intact', async () => {
+  mock.timers.setTime(new Date(2026, 11, 24, 12).getTime())
+  const overview = await request('/homework/today')
+  assert.equal(overview.data.hasEnglish, true)
+  assert.equal(overview.data.hasMath, false)
+  assert.equal(overview.data.hasChinese, false)
+  assert.equal((await request('/homework/calendar')).data.items[0].date, '2026-12-24')
+  assert.equal((await request('/homework/date/2026-12-24')).data.english.source, 'raz')
+  assert.equal((await request('/parent/raz')).status, 401)
+  assert.equal((await request('/parent/english-test/raz/2026-12-24')).status, 401)
+  const login = await request('/parent/login', { pin: '0000' })
+  const headers = { Cookie: login.cookie }
+  const defaults = await request('/parent/raz/test-dates', undefined, { headers })
+  assert.equal(defaults.data.items[0].date, '2026-12-24')
+  const dates = await request('/parent/raz/test-dates?start=2026-12-24', undefined, { headers })
+  assert.ok(dates.data.items.length >= 28)
+  db.prepare("INSERT OR REPLACE INTO raz_state(key,value_json) VALUES ('isolation-fixture','{}')").run()
+  assert.equal((await request('/parent/raz/test-reset', {}, { headers })).status, 200)
+  getEnglishTestStorage().db.prepare("INSERT INTO raz_state(key,value_json) VALUES ('isolation-fixture','{}')").run()
+  await request('/parent/raz/test-reset', {}, { headers })
+  assert.ok(db.prepare("SELECT key FROM raz_state WHERE key = 'isolation-fixture'").get())
+  assert.equal(getEnglishTestStorage().db.prepare('SELECT COUNT(*) AS count FROM raz_state').get().count, 0)
+  await request('/parent/logout', {}, { headers })
+  assert.equal((await request('/parent/english-test/raz/2026-12-24', undefined, { headers })).status, 401)
 })
 
 test('parent settings take effect and unlock self-contained reference games', async () => {

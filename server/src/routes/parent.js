@@ -2,10 +2,17 @@ import express from 'express'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { DatabaseSync } from 'node:sqlite'
 import { db, now, getSetting, setSetting, allSettings } from '../db.js'
 import { config } from '../config.js'
 import { getDays } from '../content.js'
 import { loginParent, logoutParent, requireParent, invalidateParentSessions } from '../auth.js'
+import { ANCHOR, TOTAL_DAYS, contentFor, scheduleRange, todayStr } from '../schedule.js'
+import { readingTarget } from '../english-reading.js'
+import { createEnglishRouter } from './english.js'
+import { createRazRouter } from './raz.js'
+import { raz } from './homework.js'
+import { loadRazLibrary } from '../raz-library.js'
 
 export const router = express.Router()
 
@@ -40,6 +47,98 @@ router.post('/logout', (req, res) => {
 })
 
 router.use(requireParent)
+
+let testStorage
+let testRouter
+let testRaz
+
+function englishTestRaz() {
+  testRaz ||= createRazRouter({ ...getEnglishTestStorage(), allowedDate: date => { const content = contentFor(date); return Boolean(content?.schedule.languageSubject === 'english' && content.schedule.languageIndex) } })
+  return testRaz
+}
+
+router.get('/raz', (req, res) => {
+  res.json({ ...raz.course.summary(), profile: raz.course.profile(), issues: raz.course.library().issues, resourceRoot: config.razDir })
+})
+
+router.put('/raz/profile', (req, res) => {
+  try { res.json(raz.course.setProfile(req.body)) }
+  catch (error) { res.status(error.status || 500).json({ error: error.message }) }
+})
+
+router.get('/raz/test-dates', (req, res) => {
+  const start = req.query.start || todayStr()
+  res.json({ items: scheduleRange(start, 60).filter(day => day.languageSubject === 'english' && day.languageIndex).map(day => ({ date: day.date, dayIndex: day.dayIndex, title: 'RAZ 分级阅读' })) })
+})
+
+router.post('/raz/test-reset', (req, res) => { englishTestRaz().course.reset(); res.json({ ok: true }) })
+router.put('/raz/test-profile', (req, res) => {
+  try { res.json(englishTestRaz().course.setProfile(req.body)) }
+  catch (error) { res.status(error.status || 500).json({ error: error.message }) }
+})
+router.post('/raz/rescan', (req, res) => { loadRazLibrary(config.razDir, true); res.json({ ok: true }) })
+router.use('/english-test/raz', (req, res, next) => englishTestRaz().router(req, res, next))
+
+export function getEnglishTestStorage() {
+  if (testStorage) return testStorage
+  const dataDir = path.join(config.dataDir, 'tests', 'english')
+  fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 })
+  const filename = path.join(dataDir, 'app.db')
+  const database = new DatabaseSync(filename)
+  try {
+    fs.chmodSync(filename, 0o600)
+    database.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000')
+    for (const table of ['attempts', 'voice_answers', 'daily_progress']) {
+      if (!database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) {
+        database.exec(db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table).sql)
+      }
+    }
+  } catch (error) { database.close(); throw error }
+  testStorage = { db: database, dataDir, allowedDate: (date) => Boolean(readingTarget(date)), voiceBase: '/api/parent/english-test/voice-file', active: new Set() }
+  return testStorage
+}
+
+router.use('/english-test', (req, res, next) => { res.set('Cache-Control', 'no-store'); next() })
+
+router.get('/english-test/dates', (req, res) => {
+  res.json({ items: scheduleRange(ANCHOR, TOTAL_DAYS).filter((day) => readingTarget(day.date)).map((day) => ({ date: day.date, dayIndex: day.dayIndex, title: contentFor(day.date).english.dialogues[0].title })) })
+})
+
+router.get('/english-test/date/:date', (req, res) => {
+  const { date } = req.params
+  if (!readingTarget(date)) return res.status(400).json({ error: '请选择有英语作业的测试日期' })
+  const content = contentFor(date)
+  const progress = getEnglishTestStorage().db.prepare('SELECT subject, status, score, total, submitted_at FROM daily_progress WHERE date = ?').all(date)
+  res.json({ ...content, schedule: { ...content.schedule, mathDay: null, codingDay: null }, math: null, chinese: null, coding: null, progress, locked: false, testMode: true })
+})
+
+router.get('/english-test/voice-file/:id', (req, res) => {
+  const storage = getEnglishTestStorage()
+  const row = storage.db.prepare('SELECT * FROM voice_answers WHERE id = ?').get(req.params.id)
+  if (!row) return res.status(404).json({ error: '找不到测试录音' })
+  res.set('Content-Type', row.mime_type)
+  res.set('X-Content-Type-Options', 'nosniff')
+  res.sendFile(path.resolve(storage.dataDir, row.audio_path))
+})
+
+router.post('/english-test/reset', (req, res) => {
+  const { date } = req.body || {}
+  if (!readingTarget(date)) return res.status(400).json({ error: '请选择有英语作业的测试日期' })
+  const storage = getEnglishTestStorage()
+  if (storage.active.has(date)) return res.status(409).json({ error: '正在评分，请评分结束后再重置测试' })
+  storage.db.exec('BEGIN IMMEDIATE')
+  try {
+    for (const table of ['attempts', 'voice_answers', 'daily_progress']) storage.db.prepare(`DELETE FROM ${table} WHERE date = ?`).run(date)
+    storage.db.exec('COMMIT')
+  } catch (error) { storage.db.exec('ROLLBACK'); throw error }
+  fs.rmSync(path.join(storage.dataDir, 'voice', date), { recursive: true, force: true })
+  res.json({ ok: true })
+})
+
+router.use('/english-test', (req, res, next) => {
+  testRouter ||= createEnglishRouter(getEnglishTestStorage())
+  testRouter(req, res, next)
+})
 
 /** 家长设置 */
 router.get('/settings', (req, res) => {

@@ -36,6 +36,7 @@ export const config = {
   graphDir: process.env.GRAPH_DIR || path.join(root, '教学'),
   /** SQLite 落盘位置 */
   dataDir: path.resolve(process.env.DATA_DIR || defaultDataDir()),
+  razDir: path.resolve(process.env.RAZ_RESOURCE_DIR || path.join(os.homedir(), 'Documents', 'English', 'RAZ全套资源')),
 
   /** MiniMax M3 —— OpenAI 兼容接口 */
   ai: {

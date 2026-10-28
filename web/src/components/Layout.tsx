@@ -95,7 +95,7 @@ export default function Layout() {
         </main>
 
         <footer className="border-t border-[var(--color-line)] py-4 text-center text-[12px] text-[var(--color-ink-soft)]">
-          作业内容来自《小学 14 天作业本》 · 录像仅存本机 · 启用 AI 时会发送作业文字用于批改
+          作业本与本地 RAZ 资源 · 录像仅存本机 · 启用 AI 时会发送相关作业文字用于批改
         </footer>
 
         <CameraPiP />

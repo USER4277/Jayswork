@@ -29,7 +29,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     err.locked = data?.locked
     throw err
   }
-  if (init?.method === 'POST' && ['/homework/submit', '/homework/correct', '/homework/english-complete', '/homework/coding-complete'].includes(path) && typeof init.body === 'string') {
+  if (init?.method === 'POST' && (['/homework/submit', '/homework/correct', '/homework/english-complete', '/homework/coding-complete'].includes(path) || /^\/homework\/raz\/\d{4}-\d{2}-\d{2}\/complete$/.test(path)) && typeof init.body === 'string') {
     const { date } = JSON.parse(init.body)
     if (typeof date === 'string') emitHomeworkProgress(date)
   }
@@ -69,7 +69,62 @@ export interface EnglishReading {
   result: { voiceId: string; score: number; passed: boolean; explanation: string; hint: string; transcript: string; assessmentType: 'transcript-content' } | null
 }
 
-const englishReadingPath = (date: string, line?: number) => `/homework/english-reading/${date}${line === undefined ? '' : `/line/${line}`}`
+export interface EnglishListening {
+  questions: { id: string; audio: string; options: string[] }[]
+  answers: Record<string, string>
+  result: { score: number; passed: boolean; correct: number; total: number; results: { id: string; selected: string; answer: string; correct: boolean }[] } | null
+}
+
+export interface RazBook { id: string; title: string; level: string; ready: boolean; hasVideo: boolean; hasTeacherAudio?: boolean; hasOriginalQuiz: boolean }
+export interface RazQuestion { id: string; prompt: string; audio?: string; options: { id: string; text: string }[]; source: string; bookTitle?: string }
+export interface RazResult { score: number; correct: number; total: number; results: { id: string; selected: string; answer: string; correct: boolean }[] }
+export interface RazProfile {
+  level: string | null; targetMinutes: number; masteredBooks: number; firstAccuracy: number | null; reviewAccuracy: number | null; recommendedLevel: string | null;
+  placement: { index: number; lastPassed: string | null; results: { level: string; score: number }[] }
+}
+export interface RazLibrary { available: boolean; total: number; ready: number; levels: { level: string; total: number; ready: number }[] }
+export interface RazLesson {
+  date: string; book: RazBook; kind: 'reading' | 'review'; part: number; parts: number; pages: number; wordCount: number | null; duration: number | null;
+  startPage: number; endPage: number; audioStart: number; audioEnd: number | null; questions: RazQuestion[]; reflectionPrompt: string;
+  values: { page: number; listened: boolean; reflection: string }; answers?: Record<string, string>; result: RazResult | null;
+  outputId: string | null; completed: boolean; resumedFrom?: string; source: string;
+}
+export type RazState = { date: string; profile: RazProfile; library: RazLibrary } & (
+  { mode: 'placement'; placement: { level: string; book: RazBook; pages: number; questions: RazQuestion[]; index: number } } |
+  { mode: 'lesson'; lesson: RazLesson }
+)
+
+export function getRazApi(testMode = false) {
+  const base = testMode ? '/parent/english-test/raz' : '/homework/raz'
+  return {
+    state: (date: string) => req<RazState>(`${base}/${date}`),
+    place: (date: string, index: number, answers: Record<string, string>) => req<{ result: RazResult; finished: boolean; profile: RazProfile }>(`${base}/${date}/placement`, { method: 'POST', body: JSON.stringify({ index, answers }) }),
+    progress: (date: string, patch: Partial<RazLesson['values']> & { answers?: Record<string, string> }) => req<RazLesson>(`${base}/${date}/progress`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    quiz: (date: string, answers: Record<string, string>) => req<RazLesson>(`${base}/${date}/quiz`, { method: 'POST', body: JSON.stringify({ answers }) }),
+    complete: (date: string) => req<RazLesson>(`${base}/${date}/complete`, { method: 'POST', body: JSON.stringify({ date }) }),
+    output: (date: string, audio: Blob) => { const body = new FormData(); body.append('audio', audio, 'response.webm'); return req<{ id: string }>(`${base}/${date}/output`, { method: 'POST', body }) },
+    asset: (date: string, bookId: string, kind: string) => `${BASE}${base}/${date}/assets/${bookId}/${kind}`,
+    recording: (date: string, id: string) => `${BASE}${base}/${date}/output/${id}`,
+  }
+}
+
+export const parentRaz = {
+  info: () => req<RazLibrary & { profile: RazProfile; resourceRoot: string; issues: { level: string; title: string; reason: string }[] }>('/parent/raz'),
+  profile: (level: string, targetMinutes: number) => req<RazProfile>('/parent/raz/profile', { method: 'PUT', body: JSON.stringify({ level, targetMinutes }) }),
+  dates: (start?: string) => req<{ items: { date: string; dayIndex: number; title: string }[] }>(`/parent/raz/test-dates${start ? `?start=${start}` : ''}`),
+  reset: () => req<{ ok: boolean }>('/parent/raz/test-reset', { method: 'POST', body: '{}' }),
+  testProfile: (level: string, targetMinutes: number) => req<RazProfile>('/parent/raz/test-profile', { method: 'PUT', body: JSON.stringify({ level, targetMinutes }) }),
+  rescan: () => req<{ ok: boolean }>('/parent/raz/rescan', { method: 'POST', body: '{}' }),
+}
+
+const englishReadingPath = (date: string, line?: number, prefix = '/homework') => `${prefix}/english-reading/${date}${line === undefined ? '' : `/line/${line}`}`
+const englishTestBase = '/parent/english-test'
+
+function uploadEnglishReading(date: string, audio: Blob, line?: number, prefix = '/homework') {
+  const body = new FormData()
+  body.append('audio', audio, 'reading.webm')
+  return req<EnglishReading>(englishReadingPath(date, line, prefix), { method: 'POST', body })
+}
 
 export const api = {
   today: (date?: string) =>
@@ -103,15 +158,27 @@ export const api = {
 
   englishComplete: (date: string) => req<{ ok: boolean }>('/homework/english-complete', { method: 'POST', body: JSON.stringify({ date, completed: true }) }),
 
+  englishListening: (date: string) => req<EnglishListening>(`/homework/english-listening/${date}`),
+
+  submitEnglishListening: (date: string, answers: Record<string, string>) => req<EnglishListening>(`/homework/english-listening/${date}`, { method: 'POST', body: JSON.stringify({ answers }) }),
+
   englishReading: (date: string, line?: number) => req<EnglishReading>(englishReadingPath(date, line)),
 
-  gradeEnglishReading: (date: string, audio: Blob, line?: number) => {
-    const body = new FormData()
-    body.append('audio', audio, 'reading.webm')
-    return req<EnglishReading>(englishReadingPath(date, line), { method: 'POST', body })
-  },
+  gradeEnglishReading: (date: string, audio: Blob, line?: number) => uploadEnglishReading(date, audio, line),
 
   retryEnglishReading: (date: string, voiceId: string, line?: number) => req<EnglishReading>(`${englishReadingPath(date, line)}/retry`, { method: 'POST', body: JSON.stringify({ voiceId }) }),
+
+  englishTest: {
+    dates: () => req<{ items: { date: string; dayIndex: number; title: string }[] }>(`${englishTestBase}/dates`),
+    day: (date: string) => req<DayContent>(`${englishTestBase}/date/${date}`),
+    englishReading: (date: string, line?: number) => req<EnglishReading>(englishReadingPath(date, line, englishTestBase)),
+    gradeEnglishReading: (date: string, audio: Blob, line?: number) => uploadEnglishReading(date, audio, line, englishTestBase),
+    retryEnglishReading: (date: string, voiceId: string, line?: number) => req<EnglishReading>(`${englishReadingPath(date, line, englishTestBase)}/retry`, { method: 'POST', body: JSON.stringify({ voiceId }) }),
+    englishComplete: (date: string) => req<{ ok: boolean }>(`${englishTestBase}/english-complete`, { method: 'POST', body: JSON.stringify({ date, completed: true }) }),
+    englishListening: (date: string) => req<EnglishListening>(`${englishTestBase}/english-listening/${date}`),
+    submitEnglishListening: (date: string, answers: Record<string, string>) => req<EnglishListening>(`${englishTestBase}/english-listening/${date}`, { method: 'POST', body: JSON.stringify({ answers }) }),
+    reset: (date: string) => req<{ ok: boolean }>(`${englishTestBase}/reset`, { method: 'POST', body: JSON.stringify({ date }) }),
+  },
 
   references: () => req<{ items: { project: string; title: string; unlocked: boolean; url: string }[] }>('/homework/references'),
 
